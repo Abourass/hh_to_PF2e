@@ -296,43 +296,86 @@ if test $DO_DICT = true
 end
 
 # ============================================================================
-# STEP 4: AI CLEANUP (Optional)
+# STEP 4: MARKDOWN FORMATTING
+# ============================================================================
+
+log_step "STEP 4: Markdown Formatting"
+
+for chapter_dir in $OUTPUT_ROOT/*/
+    set chapter_name (basename $chapter_dir)
+
+    if test "$chapter_name" = "final"
+        continue
+    end
+
+    # Find best source file
+    if test -f $chapter_dir/dict_cleaned.md
+        set input_file $chapter_dir/dict_cleaned.md
+    else if test -f $chapter_dir/cleaned.md
+        set input_file $chapter_dir/cleaned.md
+    else if test -f $chapter_dir/converted.md
+        set input_file $chapter_dir/converted.md
+    else
+        log_substep (set_color yellow)"Skipping $chapter_name (no source file found)"(set_color normal)
+        continue
+    end
+
+    # Check if empty
+    set line_count (wc -l < $input_file)
+    if test $line_count -eq 0
+        touch $chapter_dir/formatted.md
+        continue
+    end
+
+    set formatted_file $chapter_dir/formatted.md
+
+    log_substep "Formatting $chapter_name..."
+
+    ./markdown_format.fish $input_file $formatted_file
+end
+
+log_complete
+
+# ============================================================================
+# STEP 5: AI CLEANUP (Optional)
 # ============================================================================
 
 if test $AI_CLEANUP = true
-    log_step "STEP 4: AI-Powered Cleanup"
-    
+    log_step "STEP 5: AI-Powered Cleanup"
+
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
-        
+
         if test "$chapter_name" = "final"
             continue
         end
-        
-        set input_file $chapter_dir/dict_cleaned.md
-        if not test -f $input_file
+
+        # Use formatted file if available
+        if test -f $chapter_dir/formatted.md
+            set input_file $chapter_dir/formatted.md
+        else if test -f $chapter_dir/dict_cleaned.md
+            set input_file $chapter_dir/dict_cleaned.md
+        else if test -f $chapter_dir/cleaned.md
             set input_file $chapter_dir/cleaned.md
-        end
-        
-        if not test -f $input_file
+        else
             continue
         end
-        
+
         set ai_file $chapter_dir/ai_cleaned.md
-        
+
         log_substep "AI processing $chapter_name with $AI_BACKEND..."
-        
+
         ./ai_cleanup_claude.fish $input_file $ai_file
     end
-    
+
     log_complete
 end
 
 # ============================================================================
-# STEP 5: CONSOLIDATE FINAL OUTPUT
+# STEP 6: CONSOLIDATE FINAL OUTPUT
 # ============================================================================
 
-log_step "STEP 5: Creating Final Outputs"
+log_step "STEP 6: Creating Final Outputs"
 
 for chapter_dir in $OUTPUT_ROOT/*/
     set chapter_name (basename $chapter_dir)
@@ -341,9 +384,11 @@ for chapter_dir in $OUTPUT_ROOT/*/
         continue
     end
     
-    # Determine which file to use as final
+    # Determine which file to use as final (prefer most processed version)
     if test -f $chapter_dir/ai_cleaned.md
         set source_file $chapter_dir/ai_cleaned.md
+    else if test -f $chapter_dir/formatted.md
+        set source_file $chapter_dir/formatted.md
     else if test -f $chapter_dir/dict_cleaned.md
         set source_file $chapter_dir/dict_cleaned.md
     else if test -f $chapter_dir/cleaned.md
@@ -377,10 +422,10 @@ end
 log_complete
 
 # ============================================================================
-# STEP 6: GENERATE STATISTICS
+# STEP 7: GENERATE STATISTICS
 # ============================================================================
 
-log_step "STEP 6: Generating Statistics"
+log_step "STEP 7: Generating Statistics"
 
 set END_TIME (date +%s)
 set ELAPSED (math $END_TIME - $START_TIME)

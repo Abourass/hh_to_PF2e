@@ -17,19 +17,11 @@ if not test -f "$INPUT"
 end
 
 echo (set_color cyan)"╔════════════════════════════════════════════════════════════╗"(set_color normal)
-echo (set_color cyan)"║"(set_color normal)(set_color yellow)"        AI-POWERED OCR CLEANUP (CLAUDE CODE)           "(set_color normal)(set_color cyan)"║"(set_color normal)
+echo (set_color cyan)"║"(set_color normal)(set_color yellow)"    AI CLEANUP PREP (INTERACTIVE MODE REQUIRED)        "(set_color normal)(set_color cyan)"║"(set_color normal)
 echo (set_color cyan)"╚════════════════════════════════════════════════════════════╝"(set_color normal)
 echo ""
 
-# Check if Claude Code is available
-if not command -v claude &>/dev/null
-    echo (set_color red)"[ERROR]"(set_color normal) " Claude Code not found in PATH"
-    echo ""
-    echo "Install Claude Code from: https://github.com/anthropics/claude-code"
-    exit 1
-end
-
-# Check file size - chunk if needed
+# Check file size
 set file_size (wc -l < $INPUT)
 
 echo (set_color green)"Input:  "(set_color normal)"$INPUT"
@@ -43,87 +35,57 @@ if test $file_size -eq 0
     exit 0
 end
 
-# Create working directory in current path (not /tmp)
-set WORK_DIR ".claude_temp_"(random)
-mkdir -p $WORK_DIR
+# NOTE: Claude Code requires interactive permission for AI processing
+# This script now acts as a passthrough, marking files for interactive AI cleanup
+# Run ai_process_batch.fish after the pipeline completes to process all files
 
-# Create the system prompt
-set SYSTEM_PROMPT "You are an expert at cleaning OCR output from tabletop RPG books. Fix ONLY obvious OCR errors while preserving ALL original formatting.
+echo (set_color yellow)"[INFO]"(set_color normal) " Preparing file for interactive AI cleanup..."
+echo (set_color yellow)"[INFO]"(set_color normal) " Claude Code cannot run non-interactively in pipelines"
+echo ""
 
-RULES:
-1. Fix OCR mistakes: vou→you, eves→eyes, Jrom→from, Jaction→faction, rhe→the, wilh→with, thar→that
-2. Fix encoding: â€™→', â€œ→\", â€→\"
-3. Fix headers: remove + * ® ¢ symbols from headers
-4. PRESERVE: markdown (#, **, *), stat blocks (THAC0, AC, hp), Planescape terms (berk, basher, cutter, factol, dabus, Sigil)
-5. OUTPUT ONLY THE CLEANED TEXT - NO EXPLANATIONS
+# Copy input to output with instructions marker
+echo "<!-- AI_CLEANUP_INSTRUCTIONS:
 
-Clean this OCR text:"
+You are an expert at cleaning OCR output from tabletop RPG books and converting to proper markdown.
 
-echo (set_color yellow)"[1/2]"(set_color normal) " Processing with Claude Code..."
+RULES FOR CLEANUP:
+1. Fix OCR mistakes: vou→you, eves→eyes, Jrom→from, Jaction→faction, rhe→the, wilh→with, thar→that, bcrk→berk, Ladv→Lady, lll→III
+2. Fix encoding: â€™→', â€œ→\", â€→\", Â→(remove), â€"→—, â€"→–, â€¢→•, ¢→(remove), ®→(remove)
+3. Fix common OCR errors in headers: remove stray + * symbols from titles
 
-# Create prompt file in working directory
-echo "$SYSTEM_PROMPT
+RULES FOR MARKDOWN FORMATTING:
+1. Convert ALL CAPS HEADERS to proper markdown headers (# for h1, ## for h2, ### for h3)
+2. Preserve page break comments but clean them up: <!-- PAGE BREAK: page-N -->
+3. Create proper lists where appropriate (use - or * for bullet points)
+4. Format stat blocks and game stats consistently
+5. Use **bold** for emphasis on important terms (first use of proper nouns like \"Factol Ambar\", \"Harbinger House\")
+6. Use > blockquotes for flavor text or quotes
+7. Remove extra blank lines (max 2 consecutive blank lines)
+8. Fix broken paragraphs - if a sentence continues on the next line, join them
 
-"(cat $INPUT) > $WORK_DIR/to_clean.txt
+PRESERVE COMPLETELY:
+- Planescape slang: berk, basher, cutter, blood, barmy, factol, dabus, Sigil, the Cage, multiverse, planewalker, tanar'ri, baatezu, yugoloth
+- Faction names: Godsmen, Harmonium, Hardheads, Mercykillers, Guvners, Xaositects, Athar
+- D&D stats: THAC0, AC, hp, HD, etc.
+- Existing markdown formatting
+- Page break markers
 
-# Call Claude Code from working directory
-cd $WORK_DIR
+OUTPUT ONLY THE CLEANED, FORMATTED MARKDOWN - NO EXPLANATIONS OR PREAMBLE
 
-if claude to_clean.txt > output.txt 2>error.log
-    echo (set_color yellow)"[2/2]"(set_color normal) " Saving cleaned output..."
-    
-    # Clean up any AI preamble
-    sed -e '/^Here is the cleaned/d' \
-        -e '/^I'\''ve fixed/d' \
-        -e '/^The cleaned text/d' \
-        -e '/^Here'\''s the/d' \
-        -e '/^I need permission/d' \
-        output.txt > ../temp_output.md
-    
-    cd ..
-    mv temp_output.md $OUTPUT
-else
-    echo (set_color red)"[ERROR]"(set_color normal) " Claude Code failed"
-    if test -f $WORK_DIR/error.log
-        cat $WORK_DIR/error.log
-    end
-    cd ..
-    cp $INPUT $OUTPUT  # Fallback to original
-end
+-->
+" > $OUTPUT
 
-# Cleanup working directory
-rm -rf $WORK_DIR
-
-# Validation
-if not test -f $OUTPUT
-    echo ""
-    echo (set_color red)"✗ Output file was not created"(set_color normal)
-    exit 1
-end
+cat $INPUT >> $OUTPUT
 
 set output_size (wc -l < $OUTPUT)
-
-# Sanity check - avoid division by zero
-if test $file_size -gt 0
-    set size_diff (math "abs($output_size - $file_size)")
-    set size_change_pct (math "$size_diff * 100 / $file_size")
-    
-    echo ""
-    if test $size_change_pct -gt 50
-        echo (set_color yellow)"⚠ Warning: Output size changed by $size_change_pct% - review recommended"(set_color normal)
-    else
-        echo (set_color green)"✓ Complete!"(set_color normal)
-    end
-else
-    echo ""
-    echo (set_color green)"✓ Complete!"(set_color normal)
-end
-
 set final_words (wc -w < $OUTPUT)
 
+echo (set_color green)"✓ File prepared for AI cleanup"(set_color normal)
 echo ""
 echo "  Input:  $file_size lines"
-echo "  Output: $output_size lines"
+echo "  Output: $output_size lines (with marker)"
 echo "  Words:  $final_words"
 echo "  Saved:  $OUTPUT"
+echo ""
+echo (set_color cyan)"Next step: Run ./ai_process_batch.fish to process all files interactively"(set_color normal)
 echo ""
