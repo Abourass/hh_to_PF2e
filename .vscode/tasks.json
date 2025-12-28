@@ -1,0 +1,33 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Convert PDF Page",
+            "type": "shell",
+            "command": "${workspaceFolder}/harbinger_convert.fish",
+            "args": [
+                "${input:pdfFile}",
+                "${workspaceFolder}/converted"
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Fix Encoding",
+            "type": "shell",
+            "command": "${workspaceFolder}/fix_encoding.fish",
+            "args": ["${file}"],
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "pdfFile",
+            "type": "promptString",
+            "description": "PDF file to convert"
+        }
+    ]
+}
