@@ -365,7 +365,15 @@ if test $AI_CLEANUP = true
 
         log_substep "AI processing $chapter_name with $AI_BACKEND..."
 
-        ./ai_cleanup_claude.fish $input_file $ai_file
+        # Choose AI backend
+        if test "$AI_BACKEND" = "ollama"
+            ./ai_cleanup_ollama.fish $input_file $ai_file $AI_MODEL
+        else if test "$AI_BACKEND" = "claude"
+            ./ai_cleanup_claude.fish $input_file $ai_file
+        else
+            # Default to ollama
+            ./ai_cleanup_ollama.fish $input_file $ai_file $AI_MODEL
+        end
     end
 
     log_complete
@@ -411,9 +419,10 @@ for chapter_dir in $OUTPUT_ROOT/*/
     end
     
     # Count pages safely
-    set page_count_output (grep -c "PAGE BREAK" $source_file 2>/dev/null; or echo "0")
-    set page_count (echo $page_count_output | head -1 | string trim)
-    if test -z "$page_count"
+    set page_count (grep -c "PAGE BREAK" $source_file 2>/dev/null; or echo "0")
+    # Ensure we only have one number (take first word)
+    set page_count (echo $page_count | awk '{print $1}')
+    if test -z "$page_count"; or not string match -qr '^\d+$' -- $page_count
         set page_count 0
     end
     set -g TOTAL_PAGES (math $TOTAL_PAGES + $page_count)

@@ -34,11 +34,12 @@ echo (set_color green)"[INFO]"(set_color normal) "PDF has $PAGE_COUNT pages"
 
 # Define chapter ranges (customize for your book)
 # Format: "chapter_name:start_page-end_page"
+# NOTE: Skipping pages 1-2 (cover/copyright), stopping at 64 (last content page)
 set CHAPTERS \
-    "intro:1-5" \
-    "chapter1:6-31" \
-    "chapter2:32-52" \
-    "chapter3:53-80"
+    "intro:3-7" \
+    "chapter1:8-33" \
+    "chapter2:34-54" \
+    "chapter3:55-64"
 
 for chapter_spec in $CHAPTERS
     set parts (string split ":" $chapter_spec)
