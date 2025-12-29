@@ -340,6 +340,46 @@ function step_convert_chapters
 end
 
 # ============================================================================
+# STEP: REPROCESS LOW-CONFIDENCE REGIONS (Optional)
+# ============================================================================
+
+function step_reprocess_lowconf
+    # Check if reprocessing is enabled and threshold is set
+    set reprocess_threshold 0
+    if test -n "$CONFIG_FILE"; and command -v jq &>/dev/null
+        set reprocess_threshold (jq -r '.ocr.reprocess_threshold // 0' $CONFIG_FILE)
+    end
+    
+    if test "$reprocess_threshold" -eq 0
+        show_pipeline_progress "STEP 1.5: Reprocess Low-Conf [SKIPPED]"
+        log_complete
+        return 0
+    end
+    
+    show_pipeline_progress "STEP 1.5: Reprocess Low-Confidence Regions"
+    
+    if master_checkpoint_exists "reprocess_lowconf"
+        log_substep "Using cached reprocessing"
+        log_complete
+        return 0
+    end
+    
+    # Check if script exists
+    if not test -f "./reprocess_lowconf_regions.fish"
+        log_warn "reprocess_lowconf_regions.fish not found, skipping"
+        log_complete
+        return 0
+    end
+    
+    log_substep "Reprocessing regions below $reprocess_threshold% confidence..."
+    
+    ./reprocess_lowconf_regions.fish $OUTPUT_ROOT --threshold $reprocess_threshold
+    
+    master_checkpoint_mark "reprocess_lowconf"
+    log_complete
+end
+
+# ============================================================================
 # STEP: OCR CLEANUP
 # ============================================================================
 
@@ -994,8 +1034,8 @@ end
 # Record start time
 set -g START_TIME (date +%s)
 
-# Initialize pipeline step tracking (9 steps total)
-set -g PIPELINE_TOTAL_STEPS 9
+# Initialize pipeline step tracking (10 steps total)
+set -g PIPELINE_TOTAL_STEPS 10
 set -g PIPELINE_CURRENT_STEP 0
 
 function show_pipeline_progress
@@ -1021,6 +1061,7 @@ end
 step_convert_chapters
 or exit 1
 
+step_reprocess_lowconf
 step_ocr_cleanup
 step_dictionary_cleanup
 step_learned_corrections
