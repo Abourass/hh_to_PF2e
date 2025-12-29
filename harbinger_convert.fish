@@ -26,6 +26,11 @@ set -g DO_MORPHOLOGY false
 set -g MORPHOLOGY_OP "close diamond:1"
 set -g OCR_CONFIDENCE_THRESHOLD 60
 set -g OUTPUT_CONFIDENCE_REPORT true
+# v2.1: Configurable OCR engine params
+set -g OCR_PSM 6
+set -g OCR_OEM 1
+set -g OCR_USER_WORDS ""
+set -g OCR_LANGUAGE "eng"
 
 # Detect ImageMagick version and set command
 if command -v magick &>/dev/null
@@ -192,8 +197,28 @@ function load_config
     # Load OCR settings
     set -g OCR_CONFIDENCE_THRESHOLD (jq -r '.ocr.confidence_threshold // 60' $CONFIG_FILE)
     set -g OUTPUT_CONFIDENCE_REPORT (jq -r '.ocr.output_confidence_report // true' $CONFIG_FILE)
+    set -g OCR_PSM (jq -r '.ocr.psm // 6' $CONFIG_FILE)
+    set -g OCR_OEM (jq -r '.ocr.oem // 1' $CONFIG_FILE)
+    set -g OCR_LANGUAGE (jq -r '.ocr.language // "eng"' $CONFIG_FILE)
     
-    log_info "Config loaded: DPI=$DPI, parallel=$PARALLEL_JOBS jobs"
+    # Load user words file (relative to config file or absolute)
+    set user_words_val (jq -r '.ocr.user_words // ""' $CONFIG_FILE)
+    if test -n "$user_words_val"
+        if test -f "$user_words_val"
+            set -g OCR_USER_WORDS $user_words_val
+        else
+            # Try relative to script directory
+            set script_dir (dirname (status filename))
+            if test -f "$script_dir/$user_words_val"
+                set -g OCR_USER_WORDS "$script_dir/$user_words_val"
+            end
+        end
+    end
+    
+    log_info "Config loaded: DPI=$DPI, parallel=$PARALLEL_JOBS jobs, PSM=$OCR_PSM, OEM=$OCR_OEM"
+    if test -n "$OCR_USER_WORDS"
+        log_info "Using user words: $OCR_USER_WORDS"
+    end
 end
 
 # ============================================================================
@@ -254,19 +279,31 @@ function process_single_page
     # Preprocess
     preprocess_image $img $temp_dir/$basename-processed.png
     
-    # OCR with confidence output (TSV format)
-    tesseract $temp_dir/$basename-processed.png $temp_dir/$basename \
-        -l eng \
-        --psm 1 \
-        --oem 3 \
-        tsv 2>/dev/null
+    # Build tesseract command with configurable params
+    set tess_args $temp_dir/$basename-processed.png $temp_dir/$basename
+    set tess_args $tess_args -l $OCR_LANGUAGE
+    set tess_args $tess_args --psm $OCR_PSM
+    set tess_args $tess_args --oem $OCR_OEM
     
-    # Also get plain text
-    tesseract $temp_dir/$basename-processed.png $temp_dir/$basename-text \
-        -l eng \
-        --psm 1 \
-        --oem 3 \
-        txt 2>/dev/null
+    # Add user words if configured
+    if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
+        set tess_args $tess_args --user-words $OCR_USER_WORDS
+    end
+    
+    # OCR with confidence output (TSV format)
+    tesseract $tess_args tsv 2>/dev/null
+    
+    # Also get plain text (same params)
+    set tess_text_args $temp_dir/$basename-processed.png $temp_dir/$basename-text
+    set tess_text_args $tess_text_args -l $OCR_LANGUAGE
+    set tess_text_args $tess_text_args --psm $OCR_PSM
+    set tess_text_args $tess_text_args --oem $OCR_OEM
+    
+    if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
+        set tess_text_args $tess_text_args --user-words $OCR_USER_WORDS
+    end
+    
+    tesseract $tess_text_args txt 2>/dev/null
     
     # Extract low-confidence words for review
     if test -f $temp_dir/$basename.tsv

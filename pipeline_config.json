@@ -17,12 +17,15 @@
   },
   
   "ocr": {
+    "_comment": "PSM 6 = single uniform block (better for scanned pages), OEM 1 = LSTM only (more accurate than legacy fallback)",
     "engine": "tesseract",
     "language": "eng",
-    "psm": 1,
-    "oem": 3,
+    "psm": 6,
+    "oem": 1,
     "confidence_threshold": 60,
-    "output_confidence_report": true
+    "output_confidence_report": true,
+    "user_words": "planescape_words.txt",
+    "reprocess_threshold": 20
   },
   
   "cleanup": {
