@@ -43,47 +43,8 @@ end
 
 function get_config_presets
     # Returns JSON array of preprocessing configurations to test
-    cat <<'EOF'
-[
-  {
-    "name": "minimal",
-    "description": "Minimal preprocessing - only grayscale + deskew",
-    "despeckle": false,
-    "contrast_stretch": null,
-    "level": null,
-    "morphology": null
-  },
-  {
-    "name": "gentle",
-    "description": "Gentle preprocessing - light contrast adjustment",
-    "despeckle": false,
-    "contrast_stretch": "2%x2%",
-    "level": "10%,90%,1.0",
-    "morphology": null
-  },
-  {
-    "name": "moderate",
-    "description": "Moderate preprocessing - balanced cleanup",
-    "despeckle": false,
-    "contrast_stretch": "5%x5%",
-    "level": "15%,85%,1.2",
-    "morphology": null
-  },
-  {
-    "name": "aggressive",
-    "description": "Aggressive preprocessing - maximum cleanup",
-    "despeckle": true,
-    "contrast_stretch": "10%x10%",
-    "level": "20%,80%,1.5",
-    "morphology": "close diamond:1"
-  },
-  {
-    "name": "current",
-    "description": "Current config from pipeline_config.json",
-    "from_config": true
-  }
-]
-EOF
+    set -l script_dir (dirname (status filename))
+    jq '.' "$script_dir/presets.json"
 end
 
 # ============================================================================
