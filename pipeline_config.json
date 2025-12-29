@@ -33,7 +33,8 @@
     {
       "name": "front_matter",
       "pages": "1-2",
-      "description": "Title page and credits"
+      "description": "Title page and credits",
+      "skip_ocr": true
     },
     {
       "name": "intro",
@@ -58,7 +59,8 @@
     {
       "name": "appendix_maps",
       "pages": "65-74",
-      "description": "Maps and handouts"
+      "description": "Maps and handouts",
+      "skip_ocr": true
     }
   ],
   

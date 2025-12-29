@@ -29,6 +29,7 @@ set -g OPEN_VSCODE false
 set -g TOTAL_CHAPTERS 0
 set -g TOTAL_PAGES 0
 set -g START_TIME 0
+set -g SKIP_OCR_CHAPTERS
 
 # ============================================================================
 # LOGGING FUNCTIONS
@@ -77,9 +78,17 @@ function master_checkpoint_mark
 end
 
 function master_checkpoint_clear
-    rm -f $OUTPUT_ROOT/.master_checkpoint_* 2>/dev/null
-    # Also clear chapter checkpoints
-    rm -f $OUTPUT_ROOT/*/.checkpoint_* 2>/dev/null
+    # Use 'set' to safely expand globs that might be empty
+    set -l master_checkpoints $OUTPUT_ROOT/.master_checkpoint_* 2>/dev/null
+    if test (count $master_checkpoints) -gt 0
+        rm -f $master_checkpoints
+    end
+    
+    set -l chapter_checkpoints $OUTPUT_ROOT/*/.checkpoint_* 2>/dev/null
+    if test (count $chapter_checkpoints) -gt 0
+        rm -f $chapter_checkpoints
+    end
+    
     log_info "All checkpoints cleared"
 end
 
@@ -109,6 +118,14 @@ function load_config
     end
     
     log_info "Loading configuration from $CONFIG_FILE"
+    
+    # Load input PDF if not provided via CLI
+    if test -z "$PDF_FILE"
+        set config_input (jq -r '.input // empty' $CONFIG_FILE)
+        if test -n "$config_input"
+            set -g PDF_FILE $config_input
+        end
+    end
     
     # Load general settings
     set config_dpi (jq -r '.dpi // empty' $CONFIG_FILE)
@@ -145,6 +162,12 @@ function load_config
     set statblock_enabled (jq -r '.statblock_detection.enabled // empty' $CONFIG_FILE)
     if test "$statblock_enabled" = "false"
         set -g EXTRACT_STATBLOCKS false
+    end
+    
+    # Load chapters with skip_ocr flag
+    set -g SKIP_OCR_CHAPTERS (jq -r '.chapters[] | select(.skip_ocr == true) | .name' $CONFIG_FILE 2>/dev/null)
+    if test -n "$SKIP_OCR_CHAPTERS"
+        log_info "OCR will be skipped for: "(string join ", " $SKIP_OCR_CHAPTERS)
     end
 end
 
@@ -273,6 +296,12 @@ function step_ocr_cleanup
             continue
         end
         
+        # Skip chapters marked for no OCR processing
+        if contains $chapter_name $SKIP_OCR_CHAPTERS
+            log_substep "Skipping $chapter_name (skip_ocr enabled)"
+            continue
+        end
+        
         set input_file $chapter_dir/converted.md
         set cleaned_file $chapter_dir/cleaned.md
         
@@ -358,6 +387,11 @@ function step_dictionary_cleanup
             continue
         end
         
+        # Skip chapters marked for no OCR processing
+        if contains $chapter_name $SKIP_OCR_CHAPTERS
+            continue
+        end
+        
         # Find best input file
         set input_file ""
         for candidate in cleaned.md converted.md
@@ -422,6 +456,11 @@ function step_ai_cleanup
         set chapter_name (basename $chapter_dir)
         
         if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"
+            continue
+        end
+        
+        # Skip chapters marked for no OCR processing
+        if contains $chapter_name $SKIP_OCR_CHAPTERS
             continue
         end
         
@@ -627,16 +666,19 @@ end
 
 parse_args $argv
 
+# Load config early to check for input PDF
+load_config
+
 # Show help if no PDF
 if test -z "$PDF_FILE"
     echo (set_color cyan)"╔════════════════════════════════════════════════════════════╗"(set_color normal)
     echo (set_color cyan)"║"(set_color normal)(set_color yellow)"     HARBINGER MASTER - Complete Conversion Pipeline    "(set_color normal)(set_color cyan)"║"(set_color normal)
     echo (set_color cyan)"╚════════════════════════════════════════════════════════════╝"(set_color normal)
     echo ""
-    echo "Usage: ./harbinger_master.fish [options] input.pdf"
+    echo "Usage: ./harbinger_master.fish [options] [input.pdf]"
     echo ""
     echo "Options:"
-    echo "  --config, -c FILE   JSON configuration file"
+    echo "  --config, -c FILE   JSON configuration file (can contain input PDF)"
     echo "  --output, -o DIR    Output root directory"
     echo "  --dpi NUM           DPI for extraction (default: 300)"
     echo "  --jobs, -j NUM      Parallel jobs (default: 4)"
@@ -649,8 +691,15 @@ if test -z "$PDF_FILE"
     echo "  --clean             Clear all checkpoints"
     echo "  --status            Show pipeline status"
     echo ""
-    echo "Example:"
+    echo "Examples:"
+    echo "  # With config file (PDF specified in config):"
+    echo "  ./harbinger_master.fish --config pipeline_config.json"
+    echo ""
+    echo "  # Override config PDF:"
     echo "  ./harbinger_master.fish harbinger_house.pdf --config pipeline_config.json"
+    echo ""
+    echo "  # No config:"
+    echo "  ./harbinger_master.fish harbinger_house.pdf --dpi 400 --jobs 8"
     echo ""
     exit 1
 end
@@ -670,9 +719,6 @@ set -g STATS_FILE "$OUTPUT_ROOT/conversion_stats.md"
 
 mkdir -p $OUTPUT_ROOT
 mkdir -p $FINAL_OUTPUT
-
-# Load config
-load_config
 
 # Status only mode
 if set -q STATUS_ONLY

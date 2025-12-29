@@ -91,16 +91,27 @@ weapon SA spells SD spells SZ M ML 15 Int 16 XP 4,000.
 # Simple conversion with defaults
 ./harbinger_master.fish harbinger_house.pdf
 
-# With configuration file
+# Using config file (PDF specified in config)
+./harbinger_master.fish --config pipeline_config.json
+
+# Override config PDF
 ./harbinger_master.fish harbinger_house.pdf --config pipeline_config.json
 
 # Full options
-./harbinger_master.fish harbinger_house.pdf \
-    --config pipeline_config.json \
+./harbinger_master.fish --config pipeline_config.json \
     --dpi 400 \
     --jobs 8 \
     --ai-claude \
     --open
+```
+
+### Using npm Scripts (Convenience)
+```bash
+# If you prefer npm-style commands:
+npm run convert              # Run with config file
+npm run convert:clean        # Clean and convert
+npm run convert:resume       # Resume from checkpoint
+npm run status               # Check pipeline status
 ```
 
 ### Pipeline Steps

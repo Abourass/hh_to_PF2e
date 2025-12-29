@@ -1,0 +1,31 @@
+{
+  "name": "harbinger-house-converter",
+  "version": "2.0.0",
+  "description": "PDF to Markdown conversion pipeline for tabletop RPG books",
+  "scripts": {
+    "convert": "./harbinger_master.fish --config pipeline_config.json",
+    "convert:clean": "./harbinger_master.fish --config pipeline_config.json --clean",
+    "convert:resume": "./harbinger_master.fish --config pipeline_config.json --resume",
+    "convert:ai": "./harbinger_master.fish --config pipeline_config.json --ai-claude",
+    "status": "./harbinger_master.fish --config pipeline_config.json --status",
+    "quality-check": "./ocr_quality_checker.fish converted_harbinger_house/final/*.md",
+    "merge": "./merge_chapters.fish converted_harbinger_house",
+    "extract-statblocks": "./extract_statblocks.fish",
+    "help": "./harbinger_master.fish"
+  },
+  "keywords": [
+    "pdf",
+    "ocr",
+    "markdown",
+    "rpg",
+    "dnd",
+    "planescape",
+    "conversion"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Abourass/hh_to_PF2e.git"
+  }
+}
