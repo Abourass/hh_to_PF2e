@@ -15,16 +15,19 @@ set -g PARALLEL_JOBS 4
 # LOGGING
 # ============================================================================
 
+# IMPORTANT: All log functions output to stderr (>&2) to prevent
+# being captured by command substitution in functions that return values
+
 function log_info
-    echo (set_color green)"[INFO]"(set_color normal) $argv
+    echo (set_color green)"[INFO]"(set_color normal) $argv >&2
 end
 
 function log_warn
-    echo (set_color yellow)"[WARN]"(set_color normal) $argv
+    echo (set_color yellow)"[WARN]"(set_color normal) $argv >&2
 end
 
 function log_error
-    echo (set_color red)"[ERROR]"(set_color normal) $argv
+    echo (set_color red)"[ERROR]"(set_color normal) $argv >&2
 end
 
 # ============================================================================
