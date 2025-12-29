@@ -9,6 +9,9 @@
 #   --verbose           Show each correction applied
 #   --input FILE        Apply to a single file instead of all chapters
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 set -g OUTPUT_ROOT "converted_harbinger_house"
 set -g CORRECTIONS_FILE "corrections.json"
 set -g DRY_RUN false
@@ -243,21 +246,32 @@ function process_all_chapters
     set -l processed 0
     set -l failed 0
     
+    # Collect chapter directories first for progress tracking
+    set chapter_dirs
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
-        
-        # Skip non-chapter directories
-        if test "$chapter_name" = "final" -o "$chapter_name" = "statblocks" -o "$chapter_name" = "diagnostics"
-            continue
+        if test "$chapter_name" != "final" -a "$chapter_name" != "statblocks" -a "$chapter_name" != "diagnostics"
+            set chapter_dirs $chapter_dirs $chapter_dir
         end
+    end
+    
+    set total_chapters (count $chapter_dirs)
+    set current_chapter 0
+    progress_start $total_chapters "Applying corrections"
+    
+    for chapter_dir in $chapter_dirs
+        set current_chapter (math $current_chapter + 1)
         
         if apply_to_chapter $chapter_dir
             set processed (math $processed + 1)
         else
             set failed (math $failed + 1)
         end
+        
+        progress_update $current_chapter
     end
     
+    progress_finish
     log_info "Processed $processed chapters, $failed failed"
 end
 

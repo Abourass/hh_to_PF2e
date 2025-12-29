@@ -10,6 +10,9 @@
 #   --chapter-prefix    Add "Chapter" prefix to headings
 #   --pdf               Also generate PDF (requires pandoc)
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 set CONVERTED_DIR $argv[1]
 set OUTPUT_FILE "harbinger_house_complete.md"
 set GENERATE_TOC true
@@ -137,6 +140,9 @@ echo (set_color yellow)"[3/5]"(set_color normal) " Merging chapters..."
 set chapter_num 0
 set total_pages 0
 set total_words 0
+set total_chapter_count (count $CHAPTER_FILES)
+
+progress_start $total_chapter_count "Merging chapters"
 
 for chapter_file in $CHAPTER_FILES
     set chapter_num (math $chapter_num + 1)
@@ -172,7 +178,11 @@ for chapter_file in $CHAPTER_FILES
     set word_count (wc -w < $chapter_file)
     set total_pages (math $total_pages + $page_count)
     set total_words (math $total_words + $word_count)
+    
+    progress_update $chapter_num
 end
+
+progress_finish
 
 # ============================================================================
 # ADD APPENDIX
