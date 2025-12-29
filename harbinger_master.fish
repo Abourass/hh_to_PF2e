@@ -126,8 +126,14 @@ function master_checkpoint_clear
 
     # Clean up old chapter-level checkpoints
     for chapter_dir in $OUTPUT_ROOT/*/
-        rm -f $chapter_dir/.checkpoint_* 2>/dev/null
-        rm -f $chapter_dir/.pipeline_state.json 2>/dev/null
+        # Use 'set' to safely expand globs that may not match
+        set -l checkpoint_files $chapter_dir/.checkpoint_* 2>/dev/null
+        if test (count $checkpoint_files) -gt 0
+            rm -f $checkpoint_files 2>/dev/null
+        end
+        if test -f $chapter_dir/.pipeline_state.json
+            rm -f $chapter_dir/.pipeline_state.json
+        end
     end
 
     log_info "All checkpoints cleared (unified to single file)"
