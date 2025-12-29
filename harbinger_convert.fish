@@ -10,15 +10,16 @@ set -g CONFIG_FILE ""
 set -g TEMP_DIR ""
 
 # Defaults (can be overridden by config)
+# v2.0: Gentler preprocessing to reduce OCR artifacts
 set -g DPI 300
 set -g PARALLEL_JOBS 4
 set -g CONTRAST_LEVEL 50
 set -g DO_DESKEW true
 set -g DESKEW_THRESHOLD 40
-set -g DO_DESPECKLE true
-set -g CONTRAST_STRETCH "5%x5%"
-set -g LEVEL_ADJUST "15%,85%,1.3"
-set -g DO_MORPHOLOGY true
+set -g DO_DESPECKLE false
+set -g CONTRAST_STRETCH "2%x2%"
+set -g LEVEL_ADJUST "10%,90%,1.0"
+set -g DO_MORPHOLOGY false
 set -g MORPHOLOGY_OP "close diamond:1"
 set -g OCR_CONFIDENCE_THRESHOLD 60
 set -g OUTPUT_CONFIDENCE_REPORT true
@@ -66,32 +67,82 @@ function log_complete
 end
 
 # ============================================================================
-# CHECKPOINT FUNCTIONS
+# UNIFIED CHECKPOINT FUNCTIONS (Single JSON file)
 # ============================================================================
+
+set -g CHECKPOINT_FILE ".pipeline_state.json"
+
+function checkpoint_init
+    set state_file "$OUTPUT_DIR/$CHECKPOINT_FILE"
+    if not test -f $state_file
+        echo '{"steps": {}, "created": "'(date -Iseconds)'", "version": "2.0"}' > $state_file
+    end
+end
 
 function checkpoint_exists
     set step_name $argv[1]
-    set checkpoint_file "$OUTPUT_DIR/.checkpoint_$step_name"
-    test -f $checkpoint_file
+    set state_file "$OUTPUT_DIR/$CHECKPOINT_FILE"
+
+    if not test -f $state_file
+        return 1
+    end
+
+    if not command -v jq &>/dev/null
+        # Fallback: simple grep
+        grep -q "\"$step_name\"" $state_file
+        return $status
+    end
+
+    set result (jq -r ".steps.\"$step_name\" // \"null\"" $state_file 2>/dev/null)
+    test "$result" != "null"
 end
 
 function checkpoint_mark
     set step_name $argv[1]
-    set checkpoint_file "$OUTPUT_DIR/.checkpoint_$step_name"
-    echo (date) > $checkpoint_file
+    set state_file "$OUTPUT_DIR/$CHECKPOINT_FILE"
+
+    checkpoint_init
+
+    if not command -v jq &>/dev/null
+        log_warn "jq not available, checkpoint tracking limited"
+        return
+    end
+
+    # Update the JSON with timestamp for this step
+    jq ".steps.\"$step_name\" = \""(date -Iseconds)"\" | .updated = \""(date -Iseconds)"\"" $state_file > $state_file.tmp
+    mv $state_file.tmp $state_file
+
     log_substep "Checkpoint saved: $step_name"
 end
 
 function checkpoint_clear
+    set state_file "$OUTPUT_DIR/$CHECKPOINT_FILE"
+    rm -f $state_file 2>/dev/null
+
+    # Also clean up old-style checkpoints
     rm -f $OUTPUT_DIR/.checkpoint_* 2>/dev/null
-    log_info "Checkpoints cleared"
+
+    log_info "All checkpoints cleared"
 end
 
 function checkpoint_status
+    set state_file "$OUTPUT_DIR/$CHECKPOINT_FILE"
+
     echo (set_color yellow)"Checkpoint Status:"(set_color normal) >&2
+
+    if not test -f $state_file
+        echo "  No checkpoints found" >&2
+        return
+    end
+
     for step in extract preprocess ocr cleanup
         if checkpoint_exists $step
-            echo "  ✓ $step" >&2
+            if command -v jq &>/dev/null
+                set timestamp (jq -r ".steps.\"$step\"" $state_file 2>/dev/null)
+                echo "  ✓ $step ($timestamp)" >&2
+            else
+                echo "  ✓ $step" >&2
+            end
         else
             echo "  ○ $step" >&2
         end
@@ -122,11 +173,18 @@ function load_config
     
     set -g DO_DESKEW (jq -r '.preprocessing.deskew // true' $CONFIG_FILE)
     set -g DESKEW_THRESHOLD (jq -r '.preprocessing.deskew_threshold // 40' $CONFIG_FILE)
-    set -g DO_DESPECKLE (jq -r '.preprocessing.despeckle // true' $CONFIG_FILE)
-    set -g CONTRAST_STRETCH (jq -r '.preprocessing.contrast_stretch // "5%x5%"' $CONFIG_FILE)
-    set -g LEVEL_ADJUST (jq -r '.preprocessing.level // "15%,85%,1.3"' $CONFIG_FILE)
-    set -g DO_MORPHOLOGY (jq -r '.preprocessing.morphology != null' $CONFIG_FILE)
-    set -g MORPHOLOGY_OP (jq -r '.preprocessing.morphology // "close diamond:1"' $CONFIG_FILE)
+    set -g DO_DESPECKLE (jq -r '.preprocessing.despeckle // false' $CONFIG_FILE)
+    set -g CONTRAST_STRETCH (jq -r '.preprocessing.contrast_stretch // "2%x2%"' $CONFIG_FILE)
+    set -g LEVEL_ADJUST (jq -r '.preprocessing.level // "10%,90%,1.0"' $CONFIG_FILE)
+
+    # Morphology: check if it's explicitly set and not null
+    set morphology_val (jq -r '.preprocessing.morphology // "null"' $CONFIG_FILE)
+    if test "$morphology_val" = "null"
+        set -g DO_MORPHOLOGY false
+    else
+        set -g DO_MORPHOLOGY true
+        set -g MORPHOLOGY_OP $morphology_val
+    end
     
     # Load OCR settings
     set -g OCR_CONFIDENCE_THRESHOLD (jq -r '.ocr.confidence_threshold // 60' $CONFIG_FILE)

@@ -67,41 +67,98 @@ function log_complete
 end
 
 # ============================================================================
-# CHECKPOINT FUNCTIONS (Master Level)
+# UNIFIED CHECKPOINT FUNCTIONS (Single JSON file)
 # ============================================================================
+
+set -g CHECKPOINT_FILE ".pipeline_state.json"
+
+function master_checkpoint_init
+    set state_file "$OUTPUT_ROOT/$CHECKPOINT_FILE"
+    if not test -f $state_file
+        echo '{"master_steps": {}, "chapters": {}, "created": "'(date -Iseconds)'", "version": "2.0"}' > $state_file
+    end
+end
 
 function master_checkpoint_exists
     set step_name $argv[1]
-    test -f "$OUTPUT_ROOT/.master_checkpoint_$step_name"
+    set state_file "$OUTPUT_ROOT/$CHECKPOINT_FILE"
+
+    if not test -f $state_file
+        return 1
+    end
+
+    if not command -v jq &>/dev/null
+        grep -q "\"$step_name\"" $state_file
+        return $status
+    end
+
+    set result (jq -r ".master_steps.\"$step_name\" // \"null\"" $state_file 2>/dev/null)
+    test "$result" != "null"
 end
 
 function master_checkpoint_mark
     set step_name $argv[1]
-    echo (date) > "$OUTPUT_ROOT/.master_checkpoint_$step_name"
+    set state_file "$OUTPUT_ROOT/$CHECKPOINT_FILE"
+
+    master_checkpoint_init
+
+    if not command -v jq &>/dev/null
+        log_warn "jq not available, checkpoint tracking limited"
+        return
+    end
+
+    jq ".master_steps.\"$step_name\" = \""(date -Iseconds)"\" | .updated = \""(date -Iseconds)"\"" $state_file > $state_file.tmp
+    mv $state_file.tmp $state_file
 end
 
 function master_checkpoint_clear
-    # Use 'set' to safely expand globs that might be empty
+    set state_file "$OUTPUT_ROOT/$CHECKPOINT_FILE"
+    rm -f $state_file 2>/dev/null
+
+    # Also clean up old-style checkpoints
     set -l master_checkpoints $OUTPUT_ROOT/.master_checkpoint_* 2>/dev/null
     if test (count $master_checkpoints) -gt 0
         rm -f $master_checkpoints
     end
-    
-    set -l chapter_checkpoints $OUTPUT_ROOT/*/.checkpoint_* 2>/dev/null
-    if test (count $chapter_checkpoints) -gt 0
-        rm -f $chapter_checkpoints
+
+    # Clean up old chapter-level checkpoints
+    for chapter_dir in $OUTPUT_ROOT/*/
+        rm -f $chapter_dir/.checkpoint_* 2>/dev/null
+        rm -f $chapter_dir/.pipeline_state.json 2>/dev/null
     end
-    
-    log_info "All checkpoints cleared"
+
+    log_info "All checkpoints cleared (unified to single file)"
 end
 
 function master_checkpoint_status
+    set state_file "$OUTPUT_ROOT/$CHECKPOINT_FILE"
+
     echo (set_color yellow)"Master Pipeline Status:"(set_color normal) >&2
+
+    if not test -f $state_file
+        echo "  No checkpoints found" >&2
+        return
+    end
+
     for step in chapters cleanup dictionary learned_corrections ai_cleanup statblocks finalize diagnostics
         if master_checkpoint_exists $step
-            echo "  ✓ $step" >&2
+            if command -v jq &>/dev/null
+                set timestamp (jq -r ".master_steps.\"$step\"" $state_file 2>/dev/null)
+                echo "  ✓ $step ($timestamp)" >&2
+            else
+                echo "  ✓ $step" >&2
+            end
         else
             echo "  ○ $step" >&2
+        end
+    end
+
+    # Show chapter status if available
+    if command -v jq &>/dev/null
+        set chapter_count (jq -r '.chapters | length' $state_file 2>/dev/null)
+        if test "$chapter_count" -gt 0
+            echo "" >&2
+            echo (set_color cyan)"  Chapters processed: $chapter_count"(set_color normal) >&2
         end
     end
 end
