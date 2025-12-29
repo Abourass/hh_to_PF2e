@@ -15,6 +15,25 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from datetime import datetime
 
+# Try to import tqdm for progress bars, fall back gracefully
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+    def tqdm(iterable, **kwargs):
+        """Fallback tqdm that just returns the iterable with occasional progress prints"""
+        total = kwargs.get('total', None)
+        desc = kwargs.get('desc', 'Processing')
+        items = list(iterable)
+        if total is None:
+            total = len(items)
+        for i, item in enumerate(items):
+            if i == 0 or (i + 1) % max(1, total // 10) == 0 or i == total - 1:
+                print(f"\r{desc}: {i + 1}/{total}", end='', file=sys.stderr, flush=True)
+            yield item
+        print(file=sys.stderr)  # New line after completion
+
 # Configuration defaults
 DEFAULT_THRESHOLD = 40
 DEFAULT_MIN_OCCURRENCES = 2
@@ -189,7 +208,7 @@ def analyze_lowconf_words(output_root: Path, threshold: float) -> dict:
     
     lowconf_files = find_lowconf_files(output_root)
     
-    for filepath in lowconf_files:
+    for filepath in tqdm(lowconf_files, desc="Analyzing files", unit="file"):
         chapter_name = filepath.parent.parent.name
         entries = parse_lowconf_file(filepath)
         

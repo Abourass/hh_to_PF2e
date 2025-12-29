@@ -4,6 +4,9 @@
 # Now with: config files, parallel processing, checkpoints, OCR confidence, stat block extraction
 # Usage: ./harbinger_master.fish [options] input.pdf
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 # ============================================================================
 # GLOBAL CONFIGURATION
 # ============================================================================
@@ -294,7 +297,7 @@ end
 # ============================================================================
 
 function step_convert_chapters
-    log_step "STEP 1: PDF Conversion"
+    show_pipeline_progress "STEP 1: PDF Conversion"
     
     if master_checkpoint_exists "chapters"
         log_substep "Using cached conversion (--clean to reconvert)"
@@ -342,12 +345,12 @@ end
 
 function step_ocr_cleanup
     if not test $DO_CLEANUP = true
-        log_step "STEP 2: OCR Cleanup [SKIPPED]"
+        show_pipeline_progress "STEP 2: OCR Cleanup [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 2: OCR Cleanup"
+    show_pipeline_progress "STEP 2: OCR Cleanup"
     
     if master_checkpoint_exists "cleanup"
         log_substep "Using cached cleanup"
@@ -355,19 +358,25 @@ function step_ocr_cleanup
         return 0
     end
     
+    # Progress tracking for chapters in this step
+    set chapter_dirs
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
-        
-        # Skip special directories
         if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"
             continue
         end
-        
-        # Skip chapters marked for no OCR processing
-        if contains $chapter_name $SKIP_OCR_CHAPTERS
-            log_substep "Skipping $chapter_name (skip_ocr enabled)"
-            continue
+        if not contains $chapter_name $SKIP_OCR_CHAPTERS
+            set chapter_dirs $chapter_dirs $chapter_dir
         end
+    end
+    
+    set total_cleanup_chapters (count $chapter_dirs)
+    set cleanup_idx 0
+    progress_start $total_cleanup_chapters "Cleaning chapters"
+    
+    for chapter_dir in $chapter_dirs
+        set chapter_name (basename $chapter_dir)
+        set cleanup_idx (math $cleanup_idx + 1)
         
         set input_file $chapter_dir/converted.md
         set cleaned_file $chapter_dir/cleaned.md
@@ -416,8 +425,11 @@ function step_ocr_cleanup
             -e 's/^ \+//g' \
             -e '/^$/N;/^\n$/d' \
         > $cleaned_file
+        
+        progress_update $cleanup_idx
     end
     
+    progress_finish
     master_checkpoint_mark "cleanup"
     log_complete
 end
@@ -428,12 +440,12 @@ end
 
 function step_dictionary_cleanup
     if not test $DO_DICT = true
-        log_step "STEP 3: Dictionary Corrections [SKIPPED]"
+        show_pipeline_progress "STEP 3: Dictionary Corrections [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 3: Dictionary Corrections"
+    show_pipeline_progress "STEP 3: Dictionary Corrections"
     
     if master_checkpoint_exists "dictionary"
         log_substep "Using cached dictionary corrections"
@@ -506,12 +518,12 @@ end
 
 function step_learned_corrections
     if not test $DO_LEARNED_CORRECTIONS = true
-        log_step "STEP 3.5: Learned Corrections [SKIPPED]"
+        show_pipeline_progress "STEP 3.5: Learned Corrections [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 3.5: Learned Corrections"
+    show_pipeline_progress "STEP 3.5: Learned Corrections"
     
     if master_checkpoint_exists "learned_corrections"
         log_substep "Using cached learned corrections"
@@ -566,12 +578,12 @@ end
 
 function step_ai_cleanup
     if not test $DO_AI_CLEANUP = true
-        log_step "STEP 4: AI Cleanup [SKIPPED]"
+        show_pipeline_progress "STEP 4: AI Cleanup [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 4: AI Cleanup ($AI_BACKEND)"
+    show_pipeline_progress "STEP 4: AI Cleanup ($AI_BACKEND)"
     
     if master_checkpoint_exists "ai_cleanup"
         log_substep "Using cached AI cleanup"
@@ -627,12 +639,12 @@ end
 
 function step_extract_statblocks
     if not test $EXTRACT_STATBLOCKS = true
-        log_step "STEP 5: Stat Block Extraction [SKIPPED]"
+        show_pipeline_progress "STEP 5: Stat Block Extraction [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 5: Stat Block Extraction"
+    show_pipeline_progress "STEP 5: Stat Block Extraction"
     
     if master_checkpoint_exists "statblocks"
         log_substep "Using cached stat blocks"
@@ -685,7 +697,7 @@ end
 # ============================================================================
 
 function step_finalize
-    log_step "STEP 6: Finalizing Output"
+    show_pipeline_progress "STEP 6: Finalizing Output"
     
     mkdir -p $FINAL_OUTPUT
     
@@ -733,7 +745,7 @@ end
 # ============================================================================
 
 function step_generate_stats
-    log_step "STEP 7: Generating Statistics"
+    show_pipeline_progress "STEP 7: Generating Statistics"
     
     set END_TIME (date +%s)
     set ELAPSED (math $END_TIME - $START_TIME)
@@ -794,12 +806,12 @@ end
 
 function step_archive_diagnostics
     if not test $ARCHIVE_DIAGNOSTICS = true
-        log_step "STEP 8: Archive Diagnostics [SKIPPED]"
+        show_pipeline_progress "STEP 8: Archive Diagnostics [SKIPPED]"
         log_complete
         return 0
     end
     
-    log_step "STEP 8: Archive Diagnostics"
+    show_pipeline_progress "STEP 8: Archive Diagnostics"
     
     if master_checkpoint_exists "diagnostics"
         log_substep "Diagnostics already archived"
@@ -981,6 +993,29 @@ end
 
 # Record start time
 set -g START_TIME (date +%s)
+
+# Initialize pipeline step tracking (9 steps total)
+set -g PIPELINE_TOTAL_STEPS 9
+set -g PIPELINE_CURRENT_STEP 0
+
+function show_pipeline_progress
+    set step_name $argv[1]
+    set -g PIPELINE_CURRENT_STEP (math $PIPELINE_CURRENT_STEP + 1)
+    
+    # Calculate ETA based on elapsed time and steps completed
+    set elapsed (math (date +%s) - $START_TIME)
+    set eta_str ""
+    if test $PIPELINE_CURRENT_STEP -gt 1
+        set avg_per_step (math --scale=0 "$elapsed / ($PIPELINE_CURRENT_STEP - 1)")
+        set remaining_steps (math "$PIPELINE_TOTAL_STEPS - $PIPELINE_CURRENT_STEP + 1")
+        set eta_seconds (math "$avg_per_step * $remaining_steps")
+        set eta_str (format_eta $eta_seconds)
+    end
+    
+    set progress_bar (render_progress_bar $PIPELINE_CURRENT_STEP $PIPELINE_TOTAL_STEPS 15)
+    echo "" >&2
+    echo (set_color cyan)"┌─["(set_color yellow)" $step_name "(set_color cyan)"] "(set_color blue)"$progress_bar"(set_color normal)" "(set_color yellow)"$eta_str"(set_color normal) >&2
+end
 
 # Run pipeline steps
 step_convert_chapters

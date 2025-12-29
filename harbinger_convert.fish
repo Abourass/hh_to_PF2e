@@ -4,6 +4,9 @@
 # Now with: parallel processing, advanced preprocessing, checkpoints, OCR confidence
 # Usage: ./harbinger_convert.fish input.pdf output_dir [--config config.json]
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 set -g PDF_FILE ""
 set -g OUTPUT_DIR ""
 set -g CONFIG_FILE ""
@@ -281,8 +284,12 @@ function process_pages_parallel
     set page_files $temp_dir/page-*.png
     set total_pages (count $page_files)
     set processed 0
+    set completed 0
     
     log_substep "Processing $total_pages pages with $PARALLEL_JOBS parallel jobs..."
+    
+    # Initialize progress tracking
+    progress_start $total_pages "OCR pages"
     
     for img in $page_files
         set basename (basename $img .png)
@@ -290,6 +297,8 @@ function process_pages_parallel
         # Skip if already processed (for resume capability)
         if test -f $temp_dir/$basename.complete
             set processed (math $processed + 1)
+            set completed (math $completed + 1)
+            progress_update $completed
             continue
         end
         
@@ -298,19 +307,31 @@ function process_pages_parallel
         
         # Limit concurrent jobs
         while test (jobs -p | wc -l) -ge $PARALLEL_JOBS
+            # Check for newly completed jobs and update progress
+            set new_completed (count $temp_dir/*.complete 2>/dev/null)
+            if test $new_completed -gt $completed
+                set completed $new_completed
+                progress_update $completed
+            end
             sleep 0.2
         end
         
         set processed (math $processed + 1)
-        
-        # Progress indicator every 10 pages
-        if test (math "$processed % 10") -eq 0
-            log_substep "Progress: $processed / $total_pages pages"
-        end
     end
     
     # Wait for all jobs to complete
-    wait
+    while test (jobs -p | wc -l) -gt 0
+        set new_completed (count $temp_dir/*.complete 2>/dev/null)
+        if test $new_completed -gt $completed
+            set completed $new_completed
+            progress_update $completed
+        end
+        sleep 0.3
+    end
+    
+    # Final update
+    progress_update $total_pages
+    progress_finish
     
     log_substep "All $total_pages pages processed"
 end

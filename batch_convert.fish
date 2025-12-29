@@ -4,6 +4,9 @@
 # Reads chapter definitions from JSON config or auto-detects from PDF bookmarks
 # Usage: ./batch_convert.fish input.pdf --config pipeline_config.json
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 set -g PDF_FILE ""
 set -g CONFIG_FILE ""
 set -g OUTPUT_ROOT ""
@@ -177,8 +180,13 @@ function convert_chapters
     set skipped 0
     set failed 0
     
+    # Initialize chapter progress tracking
+    set conversion_start (date +%s)
+    set chapter_times
+    
     for chapter_spec in $chapters
         set current (math $current + 1)
+        set chapter_start (date +%s)
         
         set parts (string split ":" $chapter_spec)
         set chapter_name $parts[1]
@@ -187,9 +195,23 @@ function convert_chapters
         set start_page $range_parts[1]
         set end_page $range_parts[2]
         
+        # Calculate ETA based on previous chapter times
+        set eta_str ""
+        if test (count $chapter_times) -gt 0
+            set avg_time 0
+            for t in $chapter_times
+                set avg_time (math "$avg_time + $t")
+            end
+            set avg_time (math --scale=0 "$avg_time / "(count $chapter_times))
+            set remaining_chapters (math "$total_chapters - $current + 1")
+            set eta_seconds (math "$avg_time * $remaining_chapters")
+            set eta_str (format_eta $eta_seconds)
+        end
+        
         echo ""
         echo (set_color cyan)"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"(set_color normal)
-        echo (set_color yellow)"[$current/$total_chapters] $chapter_name "(set_color normal)"(pages $start_page-$end_page)"
+        set progress_bar (render_progress_bar $current $total_chapters 20)
+        echo (set_color yellow)"[$current/$total_chapters] $chapter_name "(set_color normal)"(pages $start_page-$end_page) "(set_color blue)"$progress_bar"(set_color normal)" "(set_color yellow)"$eta_str"(set_color normal)
         echo (set_color cyan)"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"(set_color normal)
         
         # Check if already complete
@@ -229,6 +251,10 @@ function convert_chapters
         
         # Clean up temp PDF
         rm -f $chapter_pdf
+        
+        # Record chapter processing time for ETA calculation
+        set chapter_elapsed (math (date +%s) - $chapter_start)
+        set chapter_times $chapter_times $chapter_elapsed
 
         # In demo mode, only process first chapter
         if set -q DEMO_MODE
@@ -236,6 +262,10 @@ function convert_chapters
             break
         end
     end
+    
+    # Calculate total time
+    set total_elapsed (math (date +%s) - $conversion_start)
+    set total_time_str (format_duration $total_elapsed)
     
     # Summary
     echo ""
@@ -246,6 +276,7 @@ function convert_chapters
     echo "  Converted: "(math $total_chapters - $skipped - $failed)
     echo "  Skipped:   $skipped (already done)"
     echo "  Failed:    $failed"
+    echo "  Time:      $total_time_str"
     
     return (test $failed -eq 0)
 end

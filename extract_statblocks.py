@@ -13,6 +13,25 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
+# Try to import tqdm for progress bars, fall back gracefully
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+    def tqdm(iterable, **kwargs):
+        """Fallback tqdm that just returns the iterable with occasional progress prints"""
+        total = kwargs.get('total', None)
+        desc = kwargs.get('desc', 'Processing')
+        items = list(iterable)
+        if total is None:
+            total = len(items)
+        for i, item in enumerate(items):
+            if i == 0 or (i + 1) % max(1, total // 10) == 0 or i == total - 1:
+                print(f"\r{desc}: {i + 1}/{total}", end='', file=sys.stderr, flush=True)
+            yield item
+        print(file=sys.stderr)  # New line after completion
+
 
 @dataclass
 class StatBlock:
@@ -341,7 +360,7 @@ def process_file(input_path: str, output_dir: str) -> List[StatBlock]:
     
     print(f"Found {len(regions)} potential stat block regions")
     
-    for i, (start, end, name, block_text) in enumerate(regions):
+    for i, (start, end, name, block_text) in enumerate(tqdm(regions, desc="Extracting stat blocks", unit="block")):
         block = extract_stat_block(block_text)
         
         if block:

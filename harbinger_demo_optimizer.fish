@@ -3,6 +3,9 @@
 # harbinger_demo_optimizer.fish - Test multiple preprocessing configs and pick the best
 # Usage: ./harbinger_demo_optimizer.fish --config pipeline_config.json
 
+# Source progress utilities
+source (dirname (status filename))/progress_utils.fish
+
 set -g PDF_FILE ""
 set -g CONFIG_FILE ""
 set -g OUTPUT_ROOT ""
@@ -304,17 +307,28 @@ set total_tests (count $presets)
 log_substep "Will test $total_tests configurations on first page..."
 echo ""
 
+# Initialize progress tracking
+progress_start $total_tests "Testing configs"
+
 set test_num 1
 for preset_json in $presets
     set preset_name (echo $preset_json | jq -r '.name')
     set preset_desc (echo $preset_json | jq -r '.description')
 
-    echo (set_color cyan)"Test $test_num/$total_tests:"(set_color normal)" $preset_name - $preset_desc"
+    # Update progress display with current config name
+    if is_interactive
+        spinner_clear
+    end
+    echo (set_color cyan)"│ Test $test_num/$total_tests:"(set_color normal)" $preset_name - $preset_desc" >&2
+    
     run_single_test $preset_name $preset_json
+    
+    progress_update $test_num
 
     set test_num (math $test_num + 1)
 end
 
+progress_finish
 log_complete
 
 # Present results
