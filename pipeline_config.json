@@ -1,8 +1,8 @@
 {
   "input": "harbinger_house.pdf",
   "output_root": "converted_harbinger_house",
-  "dpi": 300,
-  "parallel_jobs": 8,
+  "dpi": 800,
+  "parallel_jobs": 12,
   
   "preprocessing": {
     "enabled": true,
