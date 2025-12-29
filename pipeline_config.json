@@ -37,37 +37,27 @@
     },
     {
       "name": "intro",
-      "pages": "3-5",
+      "pages": "3-11",
       "description": "Introduction and background"
     },
     {
-      "name": "chapter1_the_house",
-      "pages": "6-16",
+      "name": "chapter1_the_Streets_of_Sigil",
+      "pages": "12-31",
       "description": "The Harbinger House location and inhabitants"
     },
     {
-      "name": "chapter2_the_heist",
-      "pages": "17-31",
+      "name": "chapter2_the_outlands",
+      "pages": "32-45",
       "description": "The plot unfolds"
     },
     {
-      "name": "chapter3_the_chase",
-      "pages": "32-52",
+      "name": "chapter3_harbinger_house",
+      "pages": "46-64",
       "description": "Pursuit across Sigil"
     },
     {
-      "name": "chapter4_the_truth",
-      "pages": "53-64",
-      "description": "Revelations and climax"
-    },
-    {
-      "name": "appendix_npcs",
-      "pages": "65-72",
-      "description": "NPC statistics and descriptions"
-    },
-    {
       "name": "appendix_maps",
-      "pages": "73-80",
+      "pages": "65-74",
       "description": "Maps and handouts"
     }
   ],
