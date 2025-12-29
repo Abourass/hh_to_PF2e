@@ -213,6 +213,9 @@ function parse_args
                 set -g CLEAN_MODE true
             case --status
                 set -g STATUS_ONLY true
+            case --demo
+                # Demo mode: only process first chapter/page
+                set -g DEMO_MODE true
             case '*.pdf'
                 set -g PDF_FILE $argv[$i]
             case '*.json'
@@ -245,9 +248,13 @@ function step_convert_chapters
     
     # Use batch_convert.fish
     set batch_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS
-    
+
     if test -n "$CONFIG_FILE"
         set batch_args $batch_args --config $CONFIG_FILE
+    end
+
+    if set -q DEMO_MODE
+        set batch_args $batch_args --demo
     end
     
     if set -q RESUME_MODE
@@ -849,6 +856,7 @@ if test -z "$PDF_FILE"
     echo "  --resume            Resume from checkpoints"
     echo "  --clean             Clear all checkpoints"
     echo "  --status            Show pipeline status"
+    echo "  --demo              Demo mode: only process first chapter"
     echo ""
     echo "Examples:"
     echo "  # With config file (PDF specified in config):"

@@ -229,6 +229,12 @@ function convert_chapters
         
         # Clean up temp PDF
         rm -f $chapter_pdf
+
+        # In demo mode, only process first chapter
+        if set -q DEMO_MODE
+            log_info "DEMO MODE: Stopping after first chapter"
+            break
+        end
     end
     
     # Summary
@@ -270,6 +276,8 @@ function parse_args
                 set -g CLEAN_MODE true
             case --list
                 set -g LIST_ONLY true
+            case --demo
+                set -g DEMO_MODE true
             case '*.pdf'
                 set -g PDF_FILE $argv[$i]
             case '*'
@@ -305,6 +313,7 @@ if test -z "$PDF_FILE"
     echo "  --auto              Auto-detect chapters from PDF bookmarks"
     echo "  --clean             Clear checkpoints and reconvert all"
     echo "  --list              List chapters without converting"
+    echo "  --demo              Demo mode: only process first chapter"
     echo ""
     echo "Config file should define chapters like:"
     echo '  {"chapters": [{"name": "intro", "pages": "1-5"}, ...]}'
@@ -350,6 +359,9 @@ echo ""
 echo (set_color green)"PDF:         "(set_color normal)"$PDF_FILE"
 echo (set_color green)"Output:      "(set_color normal)"$OUTPUT_ROOT"
 echo (set_color green)"Config:      "(set_color normal)(test -n "$CONFIG_FILE" && echo "$CONFIG_FILE" || echo "(none)")
+if set -q DEMO_MODE
+    echo (set_color yellow)"Mode:        "(set_color normal)(set_color yellow)"DEMO (first chapter only)"(set_color normal)
+end
 echo (set_color green)"DPI:         "(set_color normal)"$DPI"
 echo (set_color green)"Parallel:    "(set_color normal)"$PARALLEL_JOBS jobs"
 echo ""

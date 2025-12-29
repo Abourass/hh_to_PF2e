@@ -97,6 +97,9 @@ weapon SA spells SD spells SZ M ML 15 Int 16 XP 4,000.
 # Override config PDF
 ./harbinger_master.fish harbinger_house.pdf --config pipeline_config.json
 
+# Demo mode - quickly test settings on first chapter only
+./harbinger_master.fish --config pipeline_config.json --demo --dpi 600
+
 # Full options
 ./harbinger_master.fish --config pipeline_config.json \
     --dpi 400 \
@@ -228,10 +231,11 @@ brew install fish poppler tesseract imagemagick pdftk-java python3 jq
 ## Tips for Best Results
 
 1. **Higher DPI = Better OCR** - Use 400+ DPI for old/faded books
-2. **Check confidence reports** - Focus manual review on low-confidence areas
-3. **Use checkpoints** - For large books, run in stages
-4. **Configure preprocessing** - Adjust deskew threshold for your specific PDF
-5. **Extract stat blocks early** - Run before AI cleanup to get raw stats
+2. **Use demo mode to iterate quickly** - Test different DPI and preprocessing settings with `--demo` before processing the whole book
+3. **Check confidence reports** - Focus manual review on low-confidence areas
+4. **Use checkpoints** - For large books, run in stages
+5. **Configure preprocessing** - Adjust deskew threshold for your specific PDF
+6. **Extract stat blocks early** - Run before AI cleanup to get raw stats
 
 ## For Pathfinder 2e Conversion
 

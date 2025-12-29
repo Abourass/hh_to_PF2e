@@ -4,6 +4,7 @@
   "description": "PDF to Markdown conversion pipeline for tabletop RPG books",
   "scripts": {
     "convert": "./harbinger_master.fish --config pipeline_config.json",
+    "convert:demo": "./harbinger_master.fish --config pipeline_config.json --demo",
     "convert:clean": "./harbinger_master.fish --config pipeline_config.json --clean",
     "convert:resume": "./harbinger_master.fish --config pipeline_config.json --resume",
     "convert:ai": "./harbinger_master.fish --config pipeline_config.json --ai-claude",
