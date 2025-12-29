@@ -23,6 +23,9 @@ set -g DO_AI_CLEANUP false
 set -g AI_BACKEND "claude"
 set -g KEEP_PAGEBREAKS true
 set -g EXTRACT_STATBLOCKS true
+set -g DO_LEARNED_CORRECTIONS true
+set -g ARCHIVE_DIAGNOSTICS true
+set -g CLEANUP_TEMP_FILES true
 set -g OPEN_VSCODE false
 
 # Pipeline state
@@ -94,7 +97,7 @@ end
 
 function master_checkpoint_status
     echo (set_color yellow)"Master Pipeline Status:"(set_color normal) >&2
-    for step in chapters cleanup dictionary ai_cleanup statblocks finalize
+    for step in chapters cleanup dictionary learned_corrections ai_cleanup statblocks finalize diagnostics
         if master_checkpoint_exists $step
             echo "  ✓ $step" >&2
         else
@@ -434,6 +437,66 @@ function step_dictionary_cleanup
 end
 
 # ============================================================================
+# STEP: LEARNED CORRECTIONS (from confidence analysis)
+# ============================================================================
+
+function step_learned_corrections
+    if not test $DO_LEARNED_CORRECTIONS = true
+        log_step "STEP 3.5: Learned Corrections [SKIPPED]"
+        log_complete
+        return 0
+    end
+    
+    log_step "STEP 3.5: Learned Corrections"
+    
+    if master_checkpoint_exists "learned_corrections"
+        log_substep "Using cached learned corrections"
+        log_complete
+        return 0
+    end
+    
+    # Check if corrections.json exists
+    if not test -f "./corrections.json"
+        log_substep "No corrections.json found, generating from low-confidence data..."
+        
+        # Run the correction generator
+        if test -f "./generate_corrections.fish"
+            ./generate_corrections.fish $OUTPUT_ROOT 2>/dev/null
+        else
+            log_warn "generate_corrections.fish not found, skipping"
+            log_complete
+            return 0
+        end
+    end
+    
+    # Apply corrections using apply_corrections.fish
+    if test -f "./apply_corrections.fish"
+        log_substep "Applying learned corrections..."
+        ./apply_corrections.fish $OUTPUT_ROOT --corrections ./corrections.json
+        
+        # Update the source file preference chain
+        # The corrected.md files are now the best source
+        for chapter_dir in $OUTPUT_ROOT/*/
+            set chapter_name (basename $chapter_dir)
+            
+            if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
+                continue
+            end
+            
+            # If corrected.md exists, it's now the best pre-AI source
+            if test -f "$chapter_dir/corrected.md"
+                log_substep "Applied corrections to $chapter_name"
+            end
+        end
+    else
+        log_warn "apply_corrections.fish not found, skipping"
+    end
+    
+    master_checkpoint_mark "learned_corrections"
+    log_complete
+end
+
+# ============================================================================
 # STEP: AI CLEANUP (Optional)
 # ============================================================================
 
@@ -455,7 +518,7 @@ function step_ai_cleanup
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
         
-        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"
+        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
             continue
         end
         
@@ -464,9 +527,9 @@ function step_ai_cleanup
             continue
         end
         
-        # Find best input file
+        # Find best input file (prefer corrected.md from learned corrections)
         set input_file ""
-        for candidate in dict_cleaned.md cleaned.md converted.md
+        for candidate in corrected.md dict_cleaned.md cleaned.md converted.md
             if test -f $chapter_dir/$candidate
                 set input_file $chapter_dir/$candidate
                 break
@@ -520,13 +583,13 @@ function step_extract_statblocks
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
         
-        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"
+        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
             continue
         end
         
-        # Find best input file
+        # Find best input file (prefer AI cleaned, then corrected, then dict)
         set input_file ""
-        for candidate in ai_cleaned.md dict_cleaned.md cleaned.md converted.md
+        for candidate in ai_cleaned.md corrected.md dict_cleaned.md cleaned.md converted.md
             if test -f $chapter_dir/$candidate
                 set input_file $chapter_dir/$candidate
                 break
@@ -565,13 +628,13 @@ function step_finalize
     for chapter_dir in $OUTPUT_ROOT/*/
         set chapter_name (basename $chapter_dir)
         
-        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"
+        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
             continue
         end
         
-        # Find best source file
+        # Find best source file (prefer AI cleaned, then corrected, then dict)
         set source_file ""
-        for candidate in ai_cleaned.md dict_cleaned.md cleaned.md converted.md
+        for candidate in ai_cleaned.md corrected.md dict_cleaned.md cleaned.md converted.md
             if test -f $chapter_dir/$candidate
                 set source_file $chapter_dir/$candidate
                 break
@@ -633,6 +696,7 @@ function step_generate_stats
     echo "| Parallel Jobs | $PARALLEL_JOBS |" >> $STATS_FILE
     echo "| OCR Cleanup | "(test $DO_CLEANUP = true && echo "Yes" || echo "No")" |" >> $STATS_FILE
     echo "| Dictionary | "(test $DO_DICT = true && echo "Yes" || echo "No")" |" >> $STATS_FILE
+    echo "| Learned Corrections | "(test $DO_LEARNED_CORRECTIONS = true && echo "Yes" || echo "No")" |" >> $STATS_FILE
     echo "| AI Cleanup | "(test $DO_AI_CLEANUP = true && echo "Yes ($AI_BACKEND)" || echo "No")" |" >> $STATS_FILE
     echo "| Stat Blocks | "(test $EXTRACT_STATBLOCKS = true && echo "Extracted" || echo "Skipped")" |" >> $STATS_FILE
     echo "" >> $STATS_FILE
@@ -657,6 +721,101 @@ function step_generate_stats
     end
     
     log_substep "Statistics saved to $STATS_FILE"
+    log_complete
+end
+
+# ============================================================================
+# STEP: ARCHIVE DIAGNOSTICS & CLEANUP TEMP
+# ============================================================================
+
+function step_archive_diagnostics
+    if not test $ARCHIVE_DIAGNOSTICS = true
+        log_step "STEP 8: Archive Diagnostics [SKIPPED]"
+        log_complete
+        return 0
+    end
+    
+    log_step "STEP 8: Archive Diagnostics"
+    
+    if master_checkpoint_exists "diagnostics"
+        log_substep "Diagnostics already archived"
+        log_complete
+        return 0
+    end
+    
+    set diag_dir $OUTPUT_ROOT/diagnostics
+    mkdir -p $diag_dir
+    
+    # Aggregate all OCR confidence reports
+    log_substep "Aggregating OCR confidence reports..."
+    echo "# Aggregated OCR Confidence Report" > $diag_dir/all_confidence_reports.md
+    echo "" >> $diag_dir/all_confidence_reports.md
+    echo "Generated: "(date) >> $diag_dir/all_confidence_reports.md
+    echo "" >> $diag_dir/all_confidence_reports.md
+    
+    for chapter_dir in $OUTPUT_ROOT/*/
+        set chapter_name (basename $chapter_dir)
+        
+        if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
+            continue
+        end
+        
+        if test -f "$chapter_dir/ocr_confidence_report.txt"
+            echo "## $chapter_name" >> $diag_dir/all_confidence_reports.md
+            echo "" >> $diag_dir/all_confidence_reports.md
+            cat "$chapter_dir/ocr_confidence_report.txt" >> $diag_dir/all_confidence_reports.md
+            echo "" >> $diag_dir/all_confidence_reports.md
+        end
+    end
+    
+    # Aggregate all low-confidence words for pattern analysis
+    log_substep "Analyzing low-confidence patterns..."
+    echo "# Low-Confidence Word Patterns" > $diag_dir/lowconf_patterns.md
+    echo "" >> $diag_dir/lowconf_patterns.md
+    echo "Words with confidence below threshold, sorted by frequency" >> $diag_dir/lowconf_patterns.md
+    echo "" >> $diag_dir/lowconf_patterns.md
+    echo "| Count | Word | Avg Confidence |" >> $diag_dir/lowconf_patterns.md
+    echo "|-------|------|----------------|" >> $diag_dir/lowconf_patterns.md
+    
+    # Find all lowconf files and aggregate
+    set all_lowconf_files (find $OUTPUT_ROOT -name "*-lowconf.txt" -type f 2>/dev/null)
+    if test (count $all_lowconf_files) -gt 0
+        # Extract words and count occurrences
+        for f in $all_lowconf_files
+            cat $f
+        end | sed 's/ (conf:.*//' | sort | uniq -c | sort -rn | head -50 | while read count word
+            echo "| $count | $word | - |" >> $diag_dir/lowconf_patterns.md
+        end
+    end
+    
+    # Copy corrections.json if it exists
+    if test -f "./corrections.json"
+        cp ./corrections.json $diag_dir/corrections_used.json
+        log_substep "Saved corrections.json to diagnostics"
+    end
+    
+    # Cleanup temp files if enabled
+    if test $CLEANUP_TEMP_FILES = true
+        log_substep "Cleaning up temporary files..."
+        
+        set temp_dirs_removed 0
+        for chapter_dir in $OUTPUT_ROOT/*/
+            set chapter_name (basename $chapter_dir)
+            
+            if test "$chapter_name" = "final"; or test "$chapter_name" = "statblocks"; or test "$chapter_name" = "diagnostics"
+                continue
+            end
+            
+            if test -d "$chapter_dir/.temp"
+                rm -rf "$chapter_dir/.temp"
+                set temp_dirs_removed (math $temp_dirs_removed + 1)
+            end
+        end
+        
+        log_substep "Removed $temp_dirs_removed temp directories"
+    end
+    
+    master_checkpoint_mark "diagnostics"
     log_complete
 end
 
@@ -743,8 +902,10 @@ echo (set_color green)"DPI:         "(set_color normal)"$DPI"
 echo (set_color green)"Parallel:    "(set_color normal)"$PARALLEL_JOBS jobs"
 echo (set_color green)"Cleanup:     "(set_color normal)(test $DO_CLEANUP = true && echo "Enabled" || echo "Disabled")
 echo (set_color green)"Dictionary:  "(set_color normal)(test $DO_DICT = true && echo "Enabled" || echo "Disabled")
+echo (set_color green)"Learned:     "(set_color normal)(test $DO_LEARNED_CORRECTIONS = true && echo "Enabled" || echo "Disabled")
 echo (set_color green)"AI Cleanup:  "(set_color normal)(test $DO_AI_CLEANUP = true && echo "Enabled ($AI_BACKEND)" || echo "Disabled")
 echo (set_color green)"Stat Blocks: "(set_color normal)(test $EXTRACT_STATBLOCKS = true && echo "Enabled" || echo "Disabled")
+echo (set_color green)"Diagnostics: "(set_color normal)(test $ARCHIVE_DIAGNOSTICS = true && echo "Archive & Cleanup" || echo "Keep temp files")
 echo ""
 
 # Show checkpoint status if resuming
@@ -762,10 +923,12 @@ or exit 1
 
 step_ocr_cleanup
 step_dictionary_cleanup
+step_learned_corrections
 step_ai_cleanup
 step_extract_statblocks
 step_finalize
 step_generate_stats
+step_archive_diagnostics
 
 # Final report
 set END_TIME (date +%s)
@@ -784,14 +947,15 @@ echo "   Pages:     $TOTAL_PAGES"
 echo "   Time:      $MINUTES min $SECONDS sec"
 echo ""
 echo (set_color yellow)"📁 Output Locations:"(set_color normal)
-echo "   Final MD:    $FINAL_OUTPUT/"
-echo "   Stat Blocks: $OUTPUT_ROOT/statblocks/"
-echo "   Stats:       $STATS_FILE"
+echo "   Final MD:     $FINAL_OUTPUT/"
+echo "   Stat Blocks:  $OUTPUT_ROOT/statblocks/"
+echo "   Diagnostics:  $OUTPUT_ROOT/diagnostics/"
+echo "   Stats:        $STATS_FILE"
 echo ""
 echo (set_color yellow)"🔧 Next Steps:"(set_color normal)
 echo "   1. Review final markdown: $FINAL_OUTPUT/"
 echo "   2. Check extracted NPCs:  $OUTPUT_ROOT/statblocks/"
-echo "   3. Run quality check:     ./ocr_quality_checker.fish $FINAL_OUTPUT/*.md"
+echo "   3. Review diagnostics:    $OUTPUT_ROOT/diagnostics/"
 echo "   4. Merge chapters:        ./merge_chapters.fish $OUTPUT_ROOT"
 echo ""
 
