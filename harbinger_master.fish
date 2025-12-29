@@ -34,29 +34,32 @@ set -g START_TIME 0
 # LOGGING FUNCTIONS
 # ============================================================================
 
+# IMPORTANT: All log functions output to stderr (>&2) to prevent
+# being captured by command substitution in functions that return values
+
 function log_info
-    echo (set_color green)"[INFO]"(set_color normal) $argv
+    echo (set_color green)"[INFO]"(set_color normal) $argv >&2
 end
 
 function log_warn
-    echo (set_color yellow)"[WARN]"(set_color normal) $argv
+    echo (set_color yellow)"[WARN]"(set_color normal) $argv >&2
 end
 
 function log_error
-    echo (set_color red)"[ERROR]"(set_color normal) $argv
+    echo (set_color red)"[ERROR]"(set_color normal) $argv >&2
 end
 
 function log_step
-    echo ""
-    echo (set_color cyan)"┌─["(set_color yellow)" $argv[1] "(set_color cyan)"]"(set_color normal)
+    echo "" >&2
+    echo (set_color cyan)"┌─["(set_color yellow)" $argv[1] "(set_color cyan)"]"(set_color normal) >&2
 end
 
 function log_substep
-    echo (set_color cyan)"│ "(set_color normal)"$argv"
+    echo (set_color cyan)"│ "(set_color normal)"$argv" >&2
 end
 
 function log_complete
-    echo (set_color cyan)"└─"(set_color green)" ✓ Complete"(set_color normal)
+    echo (set_color cyan)"└─"(set_color green)" ✓ Complete"(set_color normal) >&2
 end
 
 # ============================================================================
@@ -81,12 +84,12 @@ function master_checkpoint_clear
 end
 
 function master_checkpoint_status
-    echo (set_color yellow)"Master Pipeline Status:"(set_color normal)
+    echo (set_color yellow)"Master Pipeline Status:"(set_color normal) >&2
     for step in chapters cleanup dictionary ai_cleanup statblocks finalize
         if master_checkpoint_exists $step
-            echo "  ✓ $step"
+            echo "  ✓ $step" >&2
         else
-            echo "  ○ $step"
+            echo "  ○ $step" >&2
         end
     end
 end
