@@ -268,13 +268,18 @@ function run_conversion
         log_substep "Using cached extraction from previous run"
     else
         log_step "STEP 1: PDF Extraction"
-        log_substep "Extracting pages at $DPI DPI..."
-        
-        pdftoppm -png -r $DPI $PDF_FILE $TEMP_DIR/page
-        
+
+        if set -q DEMO_MODE
+            log_substep "DEMO MODE: Extracting first page only at $DPI DPI..."
+            pdftoppm -png -r $DPI -f 1 -l 1 $PDF_FILE $TEMP_DIR/page
+        else
+            log_substep "Extracting pages at $DPI DPI..."
+            pdftoppm -png -r $DPI $PDF_FILE $TEMP_DIR/page
+        end
+
         set page_files $TEMP_DIR/page-*.png
         log_substep "Extracted "(count $page_files)" pages"
-        
+
         checkpoint_mark "extract"
     end
     
@@ -397,6 +402,9 @@ function parse_args
                 set -g CLEAN_MODE true
             case --status
                 set -g STATUS_ONLY true
+            case --demo
+                # Demo mode: only process first page
+                set -g DEMO_MODE true
             case '*.pdf'
                 set -g PDF_FILE $argv[$i]
             case '*'
@@ -436,6 +444,7 @@ if test -z "$PDF_FILE"
     echo "  --resume             Resume from last checkpoint"
     echo "  --clean              Clear checkpoints and start fresh"
     echo "  --status             Show checkpoint status only"
+    echo "  --demo               Demo mode: only process first page"
     echo ""
     echo "Example:"
     echo "  ./harbinger_convert.fish book.pdf output/ --config pipeline_config.json"
@@ -479,6 +488,9 @@ echo ""
 echo (set_color green)"PDF:         "(set_color normal)"$PDF_FILE"
 echo (set_color green)"Output:      "(set_color normal)"$OUTPUT_DIR"
 echo (set_color green)"Config:      "(set_color normal)(test -n "$CONFIG_FILE" && echo "$CONFIG_FILE" || echo "(defaults)")
+if set -q DEMO_MODE
+    echo (set_color yellow)"Mode:        "(set_color normal)(set_color yellow)"DEMO (first page only)"(set_color normal)
+end
 echo (set_color green)"DPI:         "(set_color normal)"$DPI"
 echo (set_color green)"Parallel:    "(set_color normal)"$PARALLEL_JOBS jobs"
 echo (set_color green)"Deskew:      "(set_color normal)"$DO_DESKEW (threshold: $DESKEW_THRESHOLD%)"
