@@ -1,0 +1,107 @@
+{
+  "input": "harbinger_house.pdf",
+  "output_root": "converted_harbinger_house",
+  "dpi": 300,
+  "parallel_jobs": 8,
+  
+  "preprocessing": {
+    "enabled": true,
+    "deskew": true,
+    "deskew_threshold": 40,
+    "despeckle": true,
+    "contrast_stretch": "5%x5%",
+    "level": "15%,85%,1.3",
+    "morphology": "close diamond:1"
+  },
+  
+  "ocr": {
+    "engine": "tesseract",
+    "language": "eng",
+    "psm": 1,
+    "oem": 3,
+    "confidence_threshold": 60,
+    "output_confidence_report": true
+  },
+  
+  "cleanup": {
+    "encoding": true,
+    "dictionary": true,
+    "ai_backend": "claude"
+  },
+  
+  "chapters": [
+    {
+      "name": "front_matter",
+      "pages": "1-2",
+      "description": "Title page and credits"
+    },
+    {
+      "name": "intro",
+      "pages": "3-5",
+      "description": "Introduction and background"
+    },
+    {
+      "name": "chapter1_the_house",
+      "pages": "6-16",
+      "description": "The Harbinger House location and inhabitants"
+    },
+    {
+      "name": "chapter2_the_heist",
+      "pages": "17-31",
+      "description": "The plot unfolds"
+    },
+    {
+      "name": "chapter3_the_chase",
+      "pages": "32-52",
+      "description": "Pursuit across Sigil"
+    },
+    {
+      "name": "chapter4_the_truth",
+      "pages": "53-64",
+      "description": "Revelations and climax"
+    },
+    {
+      "name": "appendix_npcs",
+      "pages": "65-72",
+      "description": "NPC statistics and descriptions"
+    },
+    {
+      "name": "appendix_maps",
+      "pages": "73-80",
+      "description": "Maps and handouts"
+    }
+  ],
+  
+  "statblock_detection": {
+    "enabled": true,
+    "output_format": "markdown",
+    "systems": ["ad&d2e"],
+    "extract_to_separate_files": true
+  },
+  
+  "planescape_dictionary": {
+    "terms": [
+      "berk", "berks", "basher", "bashers", "cutter", "cutters",
+      "blood", "bloods", "barmy", "barmies", "factol", "factols",
+      "dabus", "tanar'ri", "baatezu", "yugoloth", "yugoloths",
+      "Sigil", "the Cage", "multiverse", "planewalker", "planewalkers"
+    ],
+    "factions": [
+      "Godsmen", "Believers of the Source",
+      "Harmonium", "Hardhead", "Hardheads", 
+      "Mercykiller", "Mercykillers", "Red Death",
+      "Guvner", "Guvners", "Fraternity of Order",
+      "Xaositect", "Xaositects", "Chaosmen",
+      "Athar", "Defiers", "Lost",
+      "Bleak Cabal", "Bleakers", "Madmen",
+      "Doomguard", "Sinkers",
+      "Dustmen", "Dead",
+      "Fated", "Heartless", "Takers",
+      "Free League", "Indeps",
+      "Revolutionary League", "Anarchists",
+      "Sign of One", "Signers",
+      "Society of Sensation", "Sensates",
+      "Transcendent Order", "Ciphers"
+    ]
+  }
+}
