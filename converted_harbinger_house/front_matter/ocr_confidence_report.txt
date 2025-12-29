@@ -1,0 +1,28 @@
+# OCR Confidence Report
+Generated: Sun Dec 28 18:52:34 MST 2025
+Threshold: 60%
+
+## page-2
++HARBINGER*+ (conf: 59.473232)
+H@USE (conf: 52.964333)
+CON+ENtS (conf: 4.280655)
+1 (conf: 18.049652)
+estasy (conf: 59.615265)
+sinister (conf: 23.485321)
+@ (conf: 43.842548)
+KA (conf: 40.599842)
+® (conf: 24.379974)
+Ine. (conf: 41.597019)
+GG (conf: 34.262344)
+i (conf: 3.805962)
+Springs (conf: 3.805962)
+[MF (conf: 26.146080)
+x (conf: 47.626987)
+Ni (conf: 27.032272)
+V (conf: 19.026825)
+FET (conf: 14.405632)
+be (conf: 20.077454)
+b (conf: 22.423050)
+NI (conf: 36.649628)
+53147 (conf: 36.649628)
+

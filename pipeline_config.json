@@ -31,12 +31,6 @@
   
   "chapters": [
     {
-      "name": "front_matter",
-      "pages": "1-2",
-      "description": "Title page and credits",
-      "skip_ocr": true
-    },
-    {
       "name": "intro",
       "pages": "3-11",
       "description": "Introduction and background"
@@ -55,12 +49,6 @@
       "name": "chapter3_harbinger_house",
       "pages": "46-64",
       "description": "Pursuit across Sigil"
-    },
-    {
-      "name": "appendix_maps",
-      "pages": "65-74",
-      "description": "Maps and handouts",
-      "skip_ocr": true
     }
   ],
   

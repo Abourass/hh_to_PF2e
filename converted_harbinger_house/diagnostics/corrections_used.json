@@ -1,0 +1,53 @@
+{
+  "metadata": {
+    "description": "OCR correction patterns learned from low-confidence word analysis",
+    "version": "1.0.0",
+    "generated": "2025-12-28T18:50:36.976292",
+    "word_count": 1131,
+    "corrections_count": 2
+  },
+  "corrections": {
+    "+HE": "the",
+    "wv": ""
+  },
+  "garbage_patterns": [
+    "^[¢®©™°±§¶]+$",
+    "^[+*]+[A-Z]+[+*]*$",
+    "^Pp\\.$",
+    "^<p$",
+    "^wv$",
+    "^eT$"
+  ],
+  "preserve_terms": [
+    "tiefling",
+    "xaositects",
+    "thac0",
+    "godsmen",
+    "githyanki",
+    "cage",
+    "berk",
+    "yugoloth",
+    "guvners",
+    "portal",
+    "factol",
+    "sigil",
+    "tanar'ri",
+    "basher",
+    "aasimar",
+    "baatezu",
+    "modron",
+    "mercykillers",
+    "planewalker",
+    "sod",
+    "hardheads",
+    "athar",
+    "cutter",
+    "prime",
+    "dabus",
+    "githzerai",
+    "harmonium",
+    "blood",
+    "multiverse",
+    "barmy"
+  ]
+}
