@@ -77,7 +77,7 @@ const App: Component = () => {
 
     // Set brush size based on image dimensions (e.g., 3% of image width)
     const scaledBrushSize = Math.round(imageRef.width * 0.03);
-    setBrushSize(Math.max(50, Math.min(200, scaledBrushSize)));
+    setBrushSize(Math.max(50, Math.min(500, scaledBrushSize)));
 
     redrawCanvas();
   }
@@ -438,21 +438,13 @@ const App: Component = () => {
           🖌️ Cleanup Brush
         </button>
 
-        <button
-          class={`btn ${toolState().activeTool === 'eyedropper' ? 'btn-active' : ''}`}
-          onClick={() => setActiveTool('eyedropper')}
-          title="Click to pick a color from the image"
-        >
-          💧 Pick Color
-        </button>
-
         <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
 
         <label>Brush Size: {toolState().brushSize}px</label>
         <input
           type="range"
           min="10"
-          max="300"
+          max="500"
           value={toolState().brushSize}
           onInput={(e) => setBrushSize(parseInt(e.currentTarget.value))}
           style="width: 150px;"
@@ -466,6 +458,19 @@ const App: Component = () => {
           style={`width: 30px; height: 30px; border: 2px solid #d1d5db; border-radius: 4px; background-color: ${toolState().brushColor};`}
           title="Current brush color"
         />
+
+        <button
+          class={`btn ${toolState().activeTool === 'eyedropper' ? 'btn-active' : ''}`}
+          onClick={() => setActiveTool('eyedropper')}
+          title="Pick a color from the image"
+          style="padding: 0.5rem 0.75rem;"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m2 22 1-1h3l9-9"/>
+            <path d="M3 21v-3l9-9"/>
+            <path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l-3-3Z"/>
+          </svg>
+        </button>
 
         <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
 
