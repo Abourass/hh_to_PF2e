@@ -30,7 +30,7 @@ export interface ChapterInfo {
   pages: string[];
 }
 
-export type Tool = 'select' | 'brush' | 'pan';
+export type Tool = 'select' | 'brush' | 'eyedropper';
 
 export interface ToolState {
   activeTool: Tool;

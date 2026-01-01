@@ -4,6 +4,7 @@ import { setBrushColor } from '../stores/toolStore';
 /**
  * Auto-detect the most common color in the image (likely page background)
  * Samples from corners and edges where the page background is usually visible
+ * Uses color quantization to group similar colors together
  */
 export async function detectPageColor(): Promise<string> {
   const page = currentPage();
@@ -24,7 +25,7 @@ export async function detectPageColor(): Promise<string> {
   ctx.drawImage(img, 0, 0);
 
   // Sample corners and edges (page background is usually at borders)
-  const sampleSize = 100;
+  const sampleSize = 150;
   const sampleRegions = [
     { x: 0, y: 0, w: sampleSize, h: sampleSize }, // Top-left
     { x: img.width - sampleSize, y: 0, w: sampleSize, h: sampleSize }, // Top-right
@@ -37,38 +38,56 @@ export async function detectPageColor(): Promise<string> {
     }, // Bottom-right
   ];
 
-  const colorCounts = new Map<string, number>();
+  // Collect RGB values for averaging
+  const colorSamples: Array<{ r: number; g: number; b: number }> = [];
 
   for (const region of sampleRegions) {
     const imageData = ctx.getImageData(region.x, region.y, region.w, region.h);
 
-    for (let i = 0; i < imageData.data.length; i += 40) {
-      // Sample every 10 pixels
+    // Sample every 4th pixel (i += 16 means every 4 pixels)
+    for (let i = 0; i < imageData.data.length; i += 16) {
       const r = imageData.data[i];
       const g = imageData.data[i + 1];
       const b = imageData.data[i + 2];
-      const color = `#${r.toString(16).padStart(2, '0')}${g
-        .toString(16)
-        .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 
-      colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
+      // Only sample light-colored pixels (likely background, not text)
+      // Brightness threshold: average RGB > 200
+      const brightness = (r + g + b) / 3;
+      if (brightness > 180) {
+        colorSamples.push({ r, g, b });
+      }
     }
   }
 
-  // Find most common color
-  let maxCount = 0;
-  let mostCommonColor = '#ffffff';
+  if (colorSamples.length === 0) {
+    // Fallback to white if no light pixels found
+    setBrushColor('#ffffff');
+    console.log(`[ColorDetector] No light pixels found, using white`);
+    return '#ffffff';
+  }
 
-  colorCounts.forEach((count, color) => {
-    if (count > maxCount) {
-      maxCount = count;
-      mostCommonColor = color;
-    }
-  });
+  // Calculate average color from samples
+  let totalR = 0;
+  let totalG = 0;
+  let totalB = 0;
+
+  for (const sample of colorSamples) {
+    totalR += sample.r;
+    totalG += sample.g;
+    totalB += sample.b;
+  }
+
+  const avgR = Math.round(totalR / colorSamples.length);
+  const avgG = Math.round(totalG / colorSamples.length);
+  const avgB = Math.round(totalB / colorSamples.length);
+
+  const detectedColor = `#${avgR.toString(16).padStart(2, '0')}${avgG
+    .toString(16)
+    .padStart(2, '0')}${avgB.toString(16).padStart(2, '0')}`;
 
   // Auto-set brush color when detected
-  setBrushColor(mostCommonColor);
-  console.log(`[ColorDetector] Detected page color: ${mostCommonColor}`);
+  setBrushColor(detectedColor);
+  console.log(`[ColorDetector] Detected page color: ${detectedColor} (from ${colorSamples.length} samples)`);
 
-  return mostCommonColor;
+  return detectedColor;
 }

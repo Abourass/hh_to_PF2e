@@ -1,7 +1,7 @@
 import { Component, onMount, createSignal, createEffect, Show, For } from 'solid-js';
 import { initSession, session, currentPage, nextPage, prevPage, canGoNext, canGoPrev, isSaving, setMaskDataGetter } from './stores/sessionStore';
 import { columns, setColumns, addColumn, removeColumn, syncColumnsFromPage } from './stores/imageStore';
-import { toolState, setActiveTool, setBrushSize } from './stores/toolStore';
+import { toolState, setActiveTool, setBrushSize, setBrushColor } from './stores/toolStore';
 import { detectPageColor } from './services/colorDetector';
 import { finishSession } from './services/api';
 import { drawRectangle, drawBrush } from './utils/canvas';
@@ -157,6 +157,42 @@ const App: Component = () => {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+
+    // Draw eyedropper cursor preview
+    if (toolState().activeTool === 'eyedropper') {
+      const cursor = cursorPos();
+      const rect = canvasRef.getBoundingClientRect();
+
+      // Convert screen coordinates to canvas coordinates
+      const canvasX = (cursor.x * canvasRef.width) / rect.width;
+      const canvasY = (cursor.y * canvasRef.height) / rect.height;
+
+      // Draw crosshair
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(canvasX - 20, canvasY);
+      ctx.lineTo(canvasX + 20, canvasY);
+      ctx.stroke();
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(canvasX, canvasY - 20);
+      ctx.lineTo(canvasX, canvasY + 20);
+      ctx.stroke();
+
+      // Draw center circle
+      ctx.strokeStyle = '#06b6d4';
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   function getCanvasCoords(e: MouseEvent): { x: number; y: number } {
@@ -168,7 +204,7 @@ const App: Component = () => {
   }
 
   function handleMouseDown(e: MouseEvent) {
-    if (!canvasRef) return;
+    if (!canvasRef || !imageRef) return;
 
     // Right click for panning
     if (e.button === 2) {
@@ -178,13 +214,49 @@ const App: Component = () => {
       return;
     }
 
-    // Left click for drawing
+    // Left click handling
     if (e.button === 0) {
       const { x, y } = getCanvasCoords(e);
+      const tool = toolState().activeTool;
+
+      // Eyedropper: sample color at click position
+      if (tool === 'eyedropper') {
+        sampleColorAt(x, y);
+        return;
+      }
+
+      // Drawing tools
       setIsDrawing(true);
       setStartPos({ x, y });
       setLastPos({ x, y });
     }
+  }
+
+  function sampleColorAt(x: number, y: number) {
+    if (!canvasRef || !imageRef) return;
+
+    // Create a temporary canvas to sample from the original image (not the drawn-on canvas)
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
+    tempCanvas.width = imageRef.width;
+    tempCanvas.height = imageRef.height;
+    tempCtx.drawImage(imageRef, 0, 0);
+
+    // Sample the pixel color
+    const pixelData = tempCtx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
+    const r = pixelData[0];
+    const g = pixelData[1];
+    const b = pixelData[2];
+
+    const sampledColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
+    console.log(`[Eyedropper] Sampled color: ${sampledColor} at (${Math.floor(x)}, ${Math.floor(y)})`);
+
+    // Set brush color and switch back to brush tool
+    setBrushColor(sampledColor);
+    setActiveTool('brush');
   }
 
   function handleMouseMove(e: MouseEvent) {
@@ -366,6 +438,14 @@ const App: Component = () => {
           🖌️ Cleanup Brush
         </button>
 
+        <button
+          class={`btn ${toolState().activeTool === 'eyedropper' ? 'btn-active' : ''}`}
+          onClick={() => setActiveTool('eyedropper')}
+          title="Click to pick a color from the image"
+        >
+          💧 Pick Color
+        </button>
+
         <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
 
         <label>Brush Size: {toolState().brushSize}px</label>
@@ -429,7 +509,7 @@ const App: Component = () => {
               }}
               onWheel={handleWheel}
               onContextMenu={handleContextMenu}
-              style={`border: 2px solid #d1d5db; cursor: ${isPanning() ? 'grabbing' : toolState().activeTool === 'brush' ? 'none' : 'crosshair'}; transform: scale(${zoom()}) translate(${panOffset().x / zoom()}px, ${panOffset().y / zoom()}px); transform-origin: center; max-width: 100%; max-height: 100%;`}
+              style={`border: 2px solid #d1d5db; cursor: ${isPanning() ? 'grabbing' : toolState().activeTool === 'brush' ? 'none' : toolState().activeTool === 'eyedropper' ? 'crosshair' : 'crosshair'}; transform: scale(${zoom()}) translate(${panOffset().x / zoom()}px, ${panOffset().y / zoom()}px); transform-origin: center; max-width: 100%; max-height: 100%;`}
             />
             <canvas
               ref={maskCanvasRef}

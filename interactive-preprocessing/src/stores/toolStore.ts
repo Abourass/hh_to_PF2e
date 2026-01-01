@@ -22,6 +22,11 @@ export function setBrushColor(color: string) {
   setToolState({ ...toolState(), brushColor: color, autoDetectColor: false });
 }
 
+export function setBrushColorSilent(color: string) {
+  // Set color without triggering auto-detect flag change
+  setToolState({ ...toolState(), brushColor: color });
+}
+
 export function enableAutoDetectColor() {
   setToolState({ ...toolState(), autoDetectColor: true });
 }
