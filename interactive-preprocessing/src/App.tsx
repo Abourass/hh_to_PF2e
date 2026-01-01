@@ -23,6 +23,7 @@ const App: Component = () => {
   const [panStart, setPanStart] = createSignal({ x: 0, y: 0 });
   const [panOffset, setPanOffset] = createSignal({ x: 0, y: 0 });
   const [cursorPos, setCursorPos] = createSignal({ x: -100, y: -100 });
+  const [currentPageId, setCurrentPageId] = createSignal<string>('');
 
   onMount(async () => {
     await initSession();
@@ -38,16 +39,26 @@ const App: Component = () => {
   createEffect(() => {
     const page = currentPage();
     if (page && imageRef) {
-      syncColumnsFromPage();
-      imageRef.src = `data:image/png;base64,${page.imageData}`;
-      setZoom(1); // Reset zoom when changing pages
-      setSelectedColumnId(null); // Clear selection when changing pages
-      setPanOffset({ x: 0, y: 0 }); // Reset pan when changing pages
+      // Generate a unique page ID to detect actual page changes
+      const pageId = `${page.chapter}:${page.pageNum}`;
 
-      // Auto-detect background color for brush
-      setTimeout(() => {
-        detectPageColor().catch(console.error);
-      }, 100);
+      // Only reload image if we're actually changing pages (not just updating columns)
+      if (pageId !== currentPageId()) {
+        setCurrentPageId(pageId);
+        syncColumnsFromPage();
+        imageRef.src = `data:image/png;base64,${page.imageData}`;
+        setZoom(1); // Reset zoom when changing pages
+        setSelectedColumnId(null); // Clear selection when changing pages
+        setPanOffset({ x: 0, y: 0 }); // Reset pan when changing pages
+
+        // Auto-detect background color for brush
+        setTimeout(() => {
+          detectPageColor().catch(console.error);
+        }, 100);
+      } else {
+        // Same page, just columns updated - only sync columns
+        syncColumnsFromPage();
+      }
     }
   });
 
@@ -73,6 +84,17 @@ const App: Component = () => {
     const maskCtx = maskCanvasRef.getContext('2d');
     if (maskCtx) {
       maskCtx.clearRect(0, 0, maskCanvasRef.width, maskCanvasRef.height);
+
+      // Restore mask from page data if it exists
+      const page = currentPage();
+      if (page && page.maskData) {
+        const maskImg = new Image();
+        maskImg.onload = () => {
+          maskCtx.drawImage(maskImg, 0, 0);
+          redrawCanvas();
+        };
+        maskImg.src = page.maskData as any; // Base64 data URL
+      }
     }
 
     // Set brush size based on image dimensions (e.g., 3% of image width)
