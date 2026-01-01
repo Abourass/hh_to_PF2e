@@ -20,6 +20,44 @@ let SESSION_FILE = '';
 let OUTPUT_ROOT = '';
 
 // ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Finds the actual page file path by trying different padding formats
+ * @param {string} chapter - Chapter name
+ * @param {number} pageNum - Page number
+ * @returns {Promise<string|null>} - Path to the page file, or null if not found
+ */
+async function findPagePath(chapter, pageNum) {
+  const paddingFormats = [
+    pageNum.toString().padStart(3, '0'), // page-001.png
+    pageNum.toString().padStart(2, '0'), // page-01.png
+    pageNum.toString()                   // page-1.png
+  ];
+
+  for (const paddedNum of paddingFormats) {
+    const testPath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}.png`);
+    try {
+      await fs.access(testPath);
+      return testPath;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Gets the base path (without extension) for a page
+ * @param {string} pagePath - Full path to page file
+ * @returns {string} - Base path without .png extension
+ */
+function getBasePath(pagePath) {
+  return pagePath.replace(/\.png$/, '');
+}
+
+// ============================================================================
 // API ROUTES
 // ============================================================================
 
@@ -52,8 +90,13 @@ app.get('/api/session', async (req, res) => {
  */
 app.get('/api/page/:chapter/:pageNum', async (req, res) => {
   const { chapter, pageNum } = req.params;
-  const paddedNum = pageNum.padStart(3, '0');
-  const pagePath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}.png`);
+
+  const pagePath = await findPagePath(chapter, parseInt(pageNum));
+
+  if (!pagePath) {
+    console.error(`[Server] Page not found for ${chapter}/${pageNum} (tried all padding formats)`);
+    return res.status(404).json({ error: 'Page not found' });
+  }
 
   try {
     // Read image and convert to base64
@@ -61,7 +104,7 @@ app.get('/api/page/:chapter/:pageNum', async (req, res) => {
     const base64 = imageBuffer.toString('base64');
 
     // Check for existing metadata
-    const metadataPath = pagePath.replace('.png', '-metadata.json');
+    const metadataPath = getBasePath(pagePath) + '-metadata.json';
     let metadata = { columns: [], processed: false };
 
     try {
@@ -94,9 +137,14 @@ app.post('/api/save', async (req, res) => {
   console.log(`[Server] Saving page ${chapter}/${pageNum} with ${columns.length} columns`);
 
   try {
-    const paddedNum = pageNum.toString().padStart(3, '0');
-    const basePath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}`);
-    const originalPath = `${basePath}.png`;
+    const originalPath = await findPagePath(chapter, pageNum);
+
+    if (!originalPath) {
+      console.error(`[Server] Original page not found for ${chapter}/${pageNum}`);
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    const basePath = getBasePath(originalPath);
     const cleanedPath = `${basePath}-cleaned.png`;
 
     // 1. Apply mask if provided, otherwise copy original
