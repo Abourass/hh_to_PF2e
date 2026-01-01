@@ -55,8 +55,24 @@ output/ocr_confidence_report.txt
 ```
 This helps you quickly find and fix the most problematic areas.
 
-### 6. **Smart Stat Block Extraction**
-The new `extract_statblocks.fish` intelligently detects AD&D 2e stat blocks and outputs them as formatted markdown:
+### 6. **Interactive Preprocessing** (NEW!)
+Manual column selection and image cleanup for dramatically improved OCR accuracy:
+- **Column Detection** - Draw rectangles around text columns (processes each separately)
+- **Image Cleanup** - Brush tool to remove decorative elements, page numbers, illustrations
+- **Auto-detect Page Color** - Automatically finds background color for cleanup
+- **Improves OCR confidence from ~38% to 70%+** on multi-column pages
+
+Built with **pnpm workspaces** monorepo:
+```bash
+pnpm install          # Install all dependencies
+pnpm dev              # Run both frontend and backend
+pnpm interactive      # Launch interactive mode
+```
+
+See [INTERACTIVE_PREPROCESSING_README.md](./INTERACTIVE_PREPROCESSING_README.md) for full details.
+
+### 7. **Smart Stat Block Extraction**
+The `extract_statblocks.fish` intelligently detects AD&D 2e stat blocks and outputs them as formatted markdown:
 
 **Before (OCR mess):**
 ```
@@ -117,16 +133,50 @@ npm run convert:resume       # Resume from checkpoint
 npm run status               # Check pipeline status
 ```
 
+### Advanced: Staged Execution
+
+The pipeline now supports running specific stages independently. This is useful for:
+- Running interactive preprocessing between auto-preprocessing and OCR
+- Re-running only OCR after manual image cleanup
+- Testing different preprocessing settings
+
+```fish
+# Stage 1: Extract and auto-preprocess only
+./harbinger_master.fish --config pipeline_config.json --stage extract
+
+# Stage 2: Interactive preprocessing (optional)
+# Launch the browser UI to manually clean images and draw columns
+./interactive_preprocessing_server.fish converted_harbinger_house pipeline_config.json
+
+# Stage 3: OCR on cleaned images
+./harbinger_master.fish --config pipeline_config.json --resume --stage ocr
+
+# Or run all stages together (default)
+./harbinger_master.fish --config pipeline_config.json
+```
+
+**Available stages:**
+- `extract` - Extract PDF pages to images only
+- `preprocess` - Extract + auto-preprocessing (deskew, despeckle, etc.)
+- `ocr` - Run OCR on preprocessed images
+- `combine` - Combine OCR results into markdown
+- `all` (default) - Run complete pipeline
+
 ### Pipeline Steps
 
-1. **PDF Extraction** - Extract pages as images at specified DPI
-2. **Preprocessing** - Deskew, despeckle, enhance contrast
-3. **OCR** - Tesseract with confidence scoring
-4. **Encoding Cleanup** - Fix UTF-8 encoding issues
-5. **Dictionary Corrections** - Planescape terminology
-6. **AI Cleanup** (optional) - Claude-powered error correction
-7. **Stat Block Extraction** - Extract NPC statistics
-8. **Finalization** - Merge and generate reports
+**The pipeline runs in a carefully ordered sequence for optimal OCR accuracy:**
+
+1. **PDF Extraction & Auto-Preprocessing** - Extract pages as images at specified DPI, then apply automatic preprocessing (deskew, despeckle, contrast enhancement)
+2. **Interactive Preprocessing** (optional) - Manual column selection and image cleanup using browser-based UI - **runs BEFORE OCR for maximum effectiveness!**
+3. **OCR** - Tesseract with confidence scoring (uses cleaned/column-separated images from step 2)
+4. **Reprocess Low-Confidence** (optional) - Re-OCR regions below confidence threshold
+5. **Encoding Cleanup** - Fix UTF-8 encoding issues
+6. **Dictionary Corrections** - Planescape terminology
+7. **Learned Corrections** - Apply patterns from confidence analysis
+8. **AI Cleanup** (optional) - Claude-powered error correction
+9. **Stat Block Extraction** - Extract NPC statistics
+10. **Finalization** - Merge and generate reports
+11. **Archive Diagnostics** - Collect reports and cleanup temp files
 
 ## File Structure
 
@@ -203,7 +253,7 @@ converted_harbinger_house/
 
 ## Dependencies
 
-Required:
+### Required (Pipeline)
 - `fish` - Fish shell
 - `pdftoppm` (poppler-utils) - PDF to image conversion
 - `tesseract` - OCR engine
@@ -211,7 +261,11 @@ Required:
 - `pdftk` - PDF manipulation
 - `python3` - Stat block extraction
 
-Optional:
+### Required (Interactive Preprocessing)
+- `node` >= 18.0.0 - JavaScript runtime
+- `pnpm` >= 8.0.0 - Package manager for monorepo
+
+### Optional
 - `jq` - JSON config parsing
 - `pdfinfo` (poppler-utils) - PDF metadata
 - `claude` (Claude Code) - AI cleanup
