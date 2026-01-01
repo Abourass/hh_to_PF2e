@@ -29,9 +29,14 @@ function findFirstUnprocessedPage(session: Session): number {
   let index = 0;
   for (const chapter of session.chapters) {
     for (let i = 0; i < chapter.pages.length; i++) {
-      const pageId = `${chapter.name}:${i + 1}`;
-      if (!session.processedPages?.includes(pageId)) {
-        return index;
+      const pagePath = chapter.pages[i];
+      const match = pagePath.match(/page-(\d+)\.png$/);
+      if (match) {
+        const pageNum = parseInt(match[1], 10);
+        const pageId = `${chapter.name}:${pageNum}`;
+        if (!session.processedPages?.includes(pageId)) {
+          return index;
+        }
       }
       index++;
     }
@@ -47,8 +52,20 @@ export async function loadPage(index: number) {
   let currentIndex = 0;
   for (const chapter of s.chapters) {
     if (currentIndex + chapter.pages.length > index) {
-      const pageNumInChapter = index - currentIndex + 1;
-      const pageData = await fetchPage(chapter.name, pageNumInChapter);
+      const pageIndexInChapter = index - currentIndex;
+      const pagePath = chapter.pages[pageIndexInChapter];
+
+      // Extract the actual page number from the path
+      // e.g., "converted_harbinger_house/intro/.temp/page-1.png" -> "1"
+      // or "converted_harbinger_house/chapter2/.temp/page-01.png" -> "1"
+      const match = pagePath.match(/page-(\d+)\.png$/);
+      if (!match) {
+        console.error('Could not extract page number from:', pagePath);
+        return;
+      }
+
+      const pageNum = parseInt(match[1], 10);
+      const pageData = await fetchPage(chapter.name, pageNum);
       setCurrentPage(pageData);
       setPageIndex(index);
       return;

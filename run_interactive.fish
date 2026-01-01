@@ -20,13 +20,31 @@ if not test -d "$OUTPUT_ROOT"
     exit 1
 end
 
-# Find all pages needing preprocessing
-set chapters (find $OUTPUT_ROOT -type d -name ".temp" -not -path "*/final/*" -not -path "*/statblocks/*" -not -path "*/diagnostics/*" 2>/dev/null)
+# Get chapter order from config file if provided
+set chapter_order ""
+if test -n "$CONFIG_FILE" -a -f "$CONFIG_FILE"
+    if command -v jq &>/dev/null
+        set chapter_order (jq -r '.chapters[].name' $CONFIG_FILE 2>/dev/null)
+        echo (set_color green)"[INFO]"(set_color normal) "Using chapter order from config: $CONFIG_FILE"
+    else
+        echo (set_color yellow)"[WARN]"(set_color normal) "jq not found, cannot read config file. Using alphabetical order."
+    end
+end
 
-if test (count $chapters) -eq 0
+# Find all chapters with .temp directories
+set all_chapters (find $OUTPUT_ROOT -type d -name ".temp" -not -path "*/final/*" -not -path "*/statblocks/*" -not -path "*/diagnostics/*" 2>/dev/null)
+
+if test (count $all_chapters) -eq 0
     echo (set_color yellow)"[WARN]"(set_color normal) "No chapters with .temp directories found in $OUTPUT_ROOT"
     echo (set_color yellow)"[WARN]"(set_color normal) "Run batch_convert.fish first to extract pages"
     exit 0
+end
+
+# Create a map of chapter names to paths
+set -l chapter_map
+for chapter_temp in $all_chapters
+    set chapter_name (basename (dirname $chapter_temp))
+    set chapter_map $chapter_map "$chapter_name:$chapter_temp"
 end
 
 # Create session manifest
@@ -36,39 +54,92 @@ echo (set_color green)"[INFO]"(set_color normal) "Creating session file: $sessio
 # Initialize session JSON
 echo '{"chapters": [], "status": "active", "processedPages": [], "totalPages": 0}' > $session_file
 
-# Populate with chapters and pages
+# Populate with chapters in order from config
 set total_pages 0
-for chapter_temp in $chapters
-    set chapter_name (basename (dirname $chapter_temp))
-    set pages (find $chapter_temp -name "page-*.png" -not -name "*-processed.png" -not -name "*-cleaned.png" -not -name "*-column-*.png" | sort)
-    set page_count (count $pages)
 
-    if test $page_count -eq 0
-        continue
-    end
-
-    set total_pages (math $total_pages + $page_count)
-
-    # Convert pages array to JSON
-    set pages_json "["
-    set first true
-    for page in $pages
-        if test "$first" = "true"
-            set first false
-        else
-            set pages_json "$pages_json,"
+# If we have a chapter order from config, use it
+if test -n "$chapter_order"
+    for chapter_name in $chapter_order
+        # Find the matching chapter path
+        set chapter_temp ""
+        for entry in $chapter_map
+            set entry_name (string split -m1 ":" $entry)[1]
+            if test "$entry_name" = "$chapter_name"
+                set chapter_temp (string split -m1 ":" $entry)[2]
+                break
+            end
         end
-        set pages_json "$pages_json\"$page\""
-    end
-    set pages_json "$pages_json]"
 
-    # Add to session JSON (using jq if available)
-    if command -v jq &>/dev/null
-        jq ".chapters += [{\"name\": \"$chapter_name\", \"pages\": $pages_json}] | .totalPages = $total_pages" $session_file > $session_file.tmp
-        mv $session_file.tmp $session_file
-    end
+        if test -z "$chapter_temp"
+            echo (set_color yellow)"  ⚠ "$chapter_name" not found in output directory"(set_color normal)
+            continue
+        end
 
-    echo (set_color green)"  ✓"(set_color normal) "Chapter: $chapter_name ($page_count pages)"
+        set pages (find $chapter_temp -name "page-*.png" -not -name "*-processed.png" -not -name "*-cleaned.png" -not -name "*-column-*.png" | sort -V)
+        set page_count (count $pages)
+
+        if test $page_count -eq 0
+            continue
+        end
+
+        set total_pages (math $total_pages + $page_count)
+
+        # Convert pages array to JSON
+        set pages_json "["
+        set first true
+        for page in $pages
+            if test "$first" = "true"
+                set first false
+            else
+                set pages_json "$pages_json,"
+            end
+            set pages_json "$pages_json\"$page\""
+        end
+        set pages_json "$pages_json]"
+
+        # Add to session JSON (using jq if available)
+        if command -v jq &>/dev/null
+            jq ".chapters += [{\"name\": \"$chapter_name\", \"pages\": $pages_json}] | .totalPages = $total_pages" $session_file > $session_file.tmp
+            mv $session_file.tmp $session_file
+        end
+
+        echo (set_color green)"  ✓"(set_color normal) "Chapter: $chapter_name ($page_count pages)"
+    end
+else
+    # No config file - use alphabetical order
+    echo (set_color yellow)"[INFO]"(set_color normal) "No config file provided, using alphabetical order"
+    for chapter_temp in $all_chapters
+        set chapter_name (basename (dirname $chapter_temp))
+        set pages (find $chapter_temp -name "page-*.png" -not -name "*-processed.png" -not -name "*-cleaned.png" -not -name "*-column-*.png" | sort -V)
+        set page_count (count $pages)
+
+        if test $page_count -eq 0
+            continue
+        end
+
+        set total_pages (math $total_pages + $page_count)
+
+        # Convert pages array to JSON
+        set pages_json "["
+        set first true
+        for page in $pages
+            if test "$first" = "true"
+                set first false
+            else
+                set pages_json "$pages_json,"
+            end
+            set pages_json "$pages_json\"$page\""
+        end
+        set pages_json "$pages_json]"
+
+        # Add to session JSON (using jq if available)
+        if command -v jq &>/dev/null
+            jq ".chapters += [{\"name\": \"$chapter_name\", \"pages\": $pages_json}] | .totalPages = $total_pages" $session_file > $session_file.tmp
+            mv $session_file.tmp $session_file
+        end
+
+        echo (set_color green)"  ✓"(set_color normal) "Chapter: $chapter_name ($page_count pages)"
+    end
 end
 
 echo (set_color cyan)"Total pages to process: $total_pages"(set_color normal)

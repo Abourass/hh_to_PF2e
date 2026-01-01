@@ -117,6 +117,17 @@ canvas {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: all 0.2s;
+}
+
+.column-list-item:hover {
+  background-color: #f3f4f6;
+}
+
+.column-list-item-selected {
+  background-color: #d1fae5;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
 .column-preview {
