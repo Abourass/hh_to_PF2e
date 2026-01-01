@@ -25,6 +25,14 @@ const App: Component = () => {
   const [cursorPos, setCursorPos] = createSignal({ x: -100, y: -100 });
   const [currentPageId, setCurrentPageId] = createSignal<string>('');
 
+  // Undo system
+  interface UndoState {
+    maskData: string | null;
+    columns: Column[];
+  }
+  const [undoStack, setUndoStack] = createSignal<UndoState[]>([]);
+  const [redoStack, setRedoStack] = createSignal<UndoState[]>([]);
+
   onMount(async () => {
     await initSession();
 
@@ -50,6 +58,10 @@ const App: Component = () => {
         setZoom(1); // Reset zoom when changing pages
         setSelectedColumnId(null); // Clear selection when changing pages
         setPanOffset({ x: 0, y: 0 }); // Reset pan when changing pages
+
+        // Clear undo/redo stacks when changing pages
+        setUndoStack([]);
+        setRedoStack([]);
 
         // Auto-detect background color for brush
         setTimeout(() => {
@@ -247,10 +259,93 @@ const App: Component = () => {
         return;
       }
 
+      // Save undo state before starting any drawing action
+      saveUndoState();
+
       // Drawing tools
       setIsDrawing(true);
       setStartPos({ x, y });
       setLastPos({ x, y });
+    }
+  }
+
+  function saveUndoState() {
+    if (!maskCanvasRef) return;
+
+    // Capture current state
+    const currentState: UndoState = {
+      maskData: maskCanvasRef.toDataURL(),
+      columns: [...columns()]
+    };
+
+    // Add to undo stack (limit to 50 actions)
+    setUndoStack(prev => [...prev.slice(-49), currentState]);
+    // Clear redo stack when new action is performed
+    setRedoStack([]);
+  }
+
+  function undo() {
+    const stack = undoStack();
+    if (stack.length === 0) return;
+
+    // Save current state to redo stack
+    if (maskCanvasRef) {
+      const currentState: UndoState = {
+        maskData: maskCanvasRef.toDataURL(),
+        columns: [...columns()]
+      };
+      setRedoStack(prev => [...prev, currentState]);
+    }
+
+    // Pop from undo stack
+    const previousState = stack[stack.length - 1];
+    setUndoStack(stack.slice(0, -1));
+
+    // Restore previous state
+    restoreState(previousState);
+  }
+
+  function redo() {
+    const stack = redoStack();
+    if (stack.length === 0) return;
+
+    // Save current state to undo stack
+    if (maskCanvasRef) {
+      const currentState: UndoState = {
+        maskData: maskCanvasRef.toDataURL(),
+        columns: [...columns()]
+      };
+      setUndoStack(prev => [...prev, currentState]);
+    }
+
+    // Pop from redo stack
+    const nextState = stack[stack.length - 1];
+    setRedoStack(stack.slice(0, -1));
+
+    // Restore next state
+    restoreState(nextState);
+  }
+
+  function restoreState(state: UndoState) {
+    // Restore mask
+    if (maskCanvasRef && state.maskData) {
+      const maskCtx = maskCanvasRef.getContext('2d');
+      if (maskCtx) {
+        const maskImg = new Image();
+        maskImg.onload = () => {
+          maskCtx.clearRect(0, 0, maskCanvasRef.width, maskCanvasRef.height);
+          maskCtx.drawImage(maskImg, 0, 0);
+          redrawCanvas();
+        };
+        maskImg.src = state.maskData;
+      }
+    }
+
+    // Restore columns
+    setColumns(state.columns);
+    const page = currentPage();
+    if (page) {
+      setCurrentPage({ ...page, columns: state.columns });
     }
   }
 
@@ -458,6 +553,26 @@ const App: Component = () => {
           onClick={() => setActiveTool('brush')}
         >
           🖌️ Cleanup Brush
+        </button>
+
+        <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
+
+        <button
+          class="btn"
+          onClick={undo}
+          disabled={undoStack().length === 0}
+          title="Undo last action (Ctrl+Z)"
+        >
+          ↶ Undo
+        </button>
+
+        <button
+          class="btn"
+          onClick={redo}
+          disabled={redoStack().length === 0}
+          title="Redo (Ctrl+Y)"
+        >
+          ↷ Redo
         </button>
 
         <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
