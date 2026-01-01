@@ -2,8 +2,8 @@ import { createSignal } from 'solid-js';
 import { Tool, ToolState } from '../types';
 
 const initialState: ToolState = {
-  activeTool: 'select',
-  brushSize: 20,
+  activeTool: 'brush',
+  brushSize: 30,
   brushColor: '#ffffff',
   autoDetectColor: true,
 };

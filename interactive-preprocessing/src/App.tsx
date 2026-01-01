@@ -19,6 +19,10 @@ const App: Component = () => {
   const [zoom, setZoom] = createSignal(1);
   const [selectedColumnId, setSelectedColumnId] = createSignal<string | null>(null);
   const [dragPreview, setDragPreview] = createSignal<{x: number, y: number, width: number, height: number} | null>(null);
+  const [isPanning, setIsPanning] = createSignal(false);
+  const [panStart, setPanStart] = createSignal({ x: 0, y: 0 });
+  const [panOffset, setPanOffset] = createSignal({ x: 0, y: 0 });
+  const [cursorPos, setCursorPos] = createSignal({ x: -100, y: -100 });
 
   onMount(async () => {
     await initSession();
@@ -38,6 +42,12 @@ const App: Component = () => {
       imageRef.src = `data:image/png;base64,${page.imageData}`;
       setZoom(1); // Reset zoom when changing pages
       setSelectedColumnId(null); // Clear selection when changing pages
+      setPanOffset({ x: 0, y: 0 }); // Reset pan when changing pages
+
+      // Auto-detect background color for brush
+      setTimeout(() => {
+        detectPageColor().catch(console.error);
+      }, 100);
     }
   });
 
@@ -45,6 +55,8 @@ const App: Component = () => {
   createEffect(() => {
     const cols = columns();
     const selected = selectedColumnId();
+    const cursor = cursorPos();
+    const tool = toolState().activeTool;
     redrawCanvas();
   });
 
@@ -57,18 +69,21 @@ const App: Component = () => {
     maskCanvasRef.width = imageRef.width;
     maskCanvasRef.height = imageRef.height;
 
-    // Clear mask canvas to white (nothing masked)
+    // Clear mask canvas to transparent (nothing masked)
     const maskCtx = maskCanvasRef.getContext('2d');
     if (maskCtx) {
-      maskCtx.fillStyle = 'white';
-      maskCtx.fillRect(0, 0, maskCanvasRef.width, maskCanvasRef.height);
+      maskCtx.clearRect(0, 0, maskCanvasRef.width, maskCanvasRef.height);
     }
+
+    // Set brush size based on image dimensions (e.g., 3% of image width)
+    const scaledBrushSize = Math.round(imageRef.width * 0.03);
+    setBrushSize(Math.max(50, Math.min(200, scaledBrushSize)));
 
     redrawCanvas();
   }
 
   function redrawCanvas() {
-    if (!canvasRef || !imageRef) return;
+    if (!canvasRef || !imageRef || !maskCanvasRef) return;
 
     const ctx = canvasRef.getContext('2d');
     if (!ctx) return;
@@ -76,6 +91,9 @@ const App: Component = () => {
     // Clear and draw image
     ctx.clearRect(0, 0, canvasRef.width, canvasRef.height);
     ctx.drawImage(imageRef!, 0, 0);
+
+    // Draw mask layer on top of image (shows brushed areas)
+    ctx.drawImage(maskCanvasRef, 0, 0);
 
     const selectedId = selectedColumnId();
 
@@ -118,6 +136,27 @@ const App: Component = () => {
       ctx.strokeRect(preview.x, preview.y, preview.width, preview.height);
       ctx.setLineDash([]);
     }
+
+    // Draw brush cursor preview
+    if (toolState().activeTool === 'brush' && !isDrawing()) {
+      const cursor = cursorPos();
+      const rect = canvasRef.getBoundingClientRect();
+
+      // Convert screen coordinates to canvas coordinates
+      const canvasX = (cursor.x * canvasRef.width) / rect.width;
+      const canvasY = (cursor.y * canvasRef.height) / rect.height;
+      const brushSize = toolState().brushSize;
+
+      ctx.strokeStyle = '#ef4444';
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 4]);
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, brushSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   function getCanvasCoords(e: MouseEvent): { x: number; y: number } {
@@ -131,15 +170,42 @@ const App: Component = () => {
   function handleMouseDown(e: MouseEvent) {
     if (!canvasRef) return;
 
-    const { x, y } = getCanvasCoords(e);
+    // Right click for panning
+    if (e.button === 2) {
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
+      return;
+    }
 
-    setIsDrawing(true);
-    setStartPos({ x, y });
-    setLastPos({ x, y });
+    // Left click for drawing
+    if (e.button === 0) {
+      const { x, y } = getCanvasCoords(e);
+      setIsDrawing(true);
+      setStartPos({ x, y });
+      setLastPos({ x, y });
+    }
   }
 
   function handleMouseMove(e: MouseEvent) {
-    if (!isDrawing() || !canvasRef) return;
+    if (!canvasRef) return;
+
+    // Update cursor position for brush preview
+    const rect = canvasRef.getBoundingClientRect();
+    setCursorPos({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+
+    // Handle panning
+    if (isPanning()) {
+      const dx = e.clientX - panStart().x;
+      const dy = e.clientY - panStart().y;
+      setPanOffset({ x: dx, y: dy });
+      return;
+    }
+
+    if (!isDrawing()) return;
 
     const { x, y } = getCanvasCoords(e);
     const tool = toolState().activeTool;
@@ -181,13 +247,24 @@ const App: Component = () => {
           maskCtx.arc(cx, cy, brushSize / 2, 0, Math.PI * 2);
           maskCtx.fill();
         }
+
+        // Redraw main canvas to show the brushed area
+        redrawCanvas();
       }
       setLastPos({ x, y });
     }
   }
 
   function handleMouseUp(e: MouseEvent) {
-    if (!isDrawing() || !canvasRef) return;
+    if (!canvasRef) return;
+
+    // End panning
+    if (isPanning()) {
+      setIsPanning(false);
+      return;
+    }
+
+    if (!isDrawing()) return;
 
     const { x, y } = getCanvasCoords(e);
     const tool = toolState().activeTool;
@@ -217,6 +294,10 @@ const App: Component = () => {
 
     setIsDrawing(false);
     redrawCanvas();
+  }
+
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault(); // Prevent context menu from appearing
   }
 
   function handleWheel(e: WheelEvent) {
@@ -290,16 +371,21 @@ const App: Component = () => {
         <label>Brush Size: {toolState().brushSize}px</label>
         <input
           type="range"
-          min="5"
-          max="100"
+          min="10"
+          max="300"
           value={toolState().brushSize}
           onInput={(e) => setBrushSize(parseInt(e.currentTarget.value))}
           style="width: 150px;"
         />
 
-        <button class="btn" onClick={detectPageColor}>
+        <button class="btn" onClick={() => detectPageColor()}>
           🎨 Auto-Detect Color
         </button>
+
+        <div
+          style={`width: 30px; height: 30px; border: 2px solid #d1d5db; border-radius: 4px; background-color: ${toolState().brushColor};`}
+          title="Current brush color"
+        />
 
         <div style="border-left: 1px solid #d1d5db; height: 2rem;" />
 
@@ -307,6 +393,9 @@ const App: Component = () => {
         <button class="btn" onClick={() => setZoom(1)}>
           Reset Zoom
         </button>
+        <span style="font-size: 0.75rem; color: #6b7280; font-style: italic;">
+          Right-click + drag to pan
+        </span>
 
         <div style="flex: 1;" />
 
@@ -333,8 +422,14 @@ const App: Component = () => {
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
+              onMouseLeave={() => {
+                setIsDrawing(false);
+                setIsPanning(false);
+                setCursorPos({ x: -100, y: -100 });
+              }}
               onWheel={handleWheel}
-              style={`border: 2px solid #d1d5db; cursor: crosshair; transform: scale(${zoom()}); transform-origin: center; max-width: 100%; max-height: 100%;`}
+              onContextMenu={handleContextMenu}
+              style={`border: 2px solid #d1d5db; cursor: ${isPanning() ? 'grabbing' : toolState().activeTool === 'brush' ? 'none' : 'crosshair'}; transform: scale(${zoom()}) translate(${panOffset().x / zoom()}px, ${panOffset().y / zoom()}px); transform-origin: center; max-width: 100%; max-height: 100%;`}
             />
             <canvas
               ref={maskCanvasRef}
