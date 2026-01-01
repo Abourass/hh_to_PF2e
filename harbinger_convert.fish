@@ -295,7 +295,11 @@ end
 
 function preprocess_pages_parallel
     set temp_dir $argv[1]
-    set page_files $temp_dir/page-*.png
+    # Only process original pages, not intermediate files
+    set page_files (find $temp_dir -name "page-*.png" \
+                    -not -name "*-processed.png" \
+                    -not -name "*-cleaned.png" \
+                    -not -name "*-column-*.png" | sort -V)
     set total_pages (count $page_files)
     set processed 0
     set completed 0
@@ -469,7 +473,11 @@ end
 
 function ocr_pages_parallel
     set temp_dir $argv[1]
-    set page_files $temp_dir/page-*.png
+    # Only process original pages, not intermediate files
+    set page_files (find $temp_dir -name "page-*.png" \
+                    -not -name "*-processed.png" \
+                    -not -name "*-cleaned.png" \
+                    -not -name "*-column-*.png" | sort -V)
     set total_pages (count $page_files)
     set processed 0
     set completed 0

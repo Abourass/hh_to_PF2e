@@ -25,6 +25,7 @@ let OUTPUT_ROOT = '';
 
 /**
  * Finds the actual page file path by trying different padding formats
+ * Prioritizes preprocessed images over originals
  * @param {string} chapter - Chapter name
  * @param {number} pageNum - Page number
  * @returns {Promise<string|null>} - Path to the page file, or null if not found
@@ -36,15 +37,30 @@ async function findPagePath(chapter, pageNum) {
     pageNum.toString()                   // page-1.png
   ];
 
+  // Try preprocessed images first
   for (const paddedNum of paddingFormats) {
-    const testPath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}.png`);
+    const processedPath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}-processed.png`);
     try {
-      await fs.access(testPath);
-      return testPath;
+      await fs.access(processedPath);
+      console.log(`[Server] Found preprocessed image: ${processedPath}`);
+      return processedPath;
     } catch {
       continue;
     }
   }
+
+  // Fall back to original images
+  for (const paddedNum of paddingFormats) {
+    const originalPath = path.join(OUTPUT_ROOT, chapter, '.temp', `page-${paddedNum}.png`);
+    try {
+      await fs.access(originalPath);
+      console.log(`[Server] Using original image: ${originalPath}`);
+      return originalPath;
+    } catch {
+      continue;
+    }
+  }
+  
   return null;
 }
 
@@ -103,9 +119,12 @@ app.get('/api/page/:chapter/:pageNum', async (req, res) => {
     const imageBuffer = await fs.readFile(pagePath);
     const base64 = imageBuffer.toString('base64');
 
+    // Determine if this is a preprocessed image
+    const isPreprocessed = pagePath.includes('-processed.png');
+
     // Check for existing metadata
     const metadataPath = getBasePath(pagePath) + '-metadata.json';
-    let metadata = { columns: [], processed: false };
+    let metadata = { columns: [], processed: false, isPreprocessed };
 
     try {
       const metadataContent = await fs.readFile(metadataPath, 'utf-8');
@@ -137,22 +156,30 @@ app.post('/api/save', async (req, res) => {
   console.log(`[Server] Saving page ${chapter}/${pageNum} with ${columns.length} columns`);
 
   try {
-    const originalPath = await findPagePath(chapter, pageNum);
+    // Find the preprocessed image (or original as fallback)
+    const sourcePath = await findPagePath(chapter, pageNum);
 
-    if (!originalPath) {
-      console.error(`[Server] Original page not found for ${chapter}/${pageNum}`);
+    if (!sourcePath) {
+      console.error(`[Server] Source image not found for ${chapter}/${pageNum}`);
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    const basePath = getBasePath(originalPath);
+    // Extract base path from either "page-N-processed.png" or "page-N.png"
+    // This ensures output files are named "page-N-cleaned.png" and "page-N-column-X.png"
+    const baseMatch = path.basename(sourcePath).match(/^(page-\d+)(?:-processed)?\.png$/);
+    if (!baseMatch) {
+      console.error(`[Server] Invalid page filename format: ${sourcePath}`);
+      return res.status(400).json({ error: 'Invalid page filename' });
+    }
+    const basePath = path.join(path.dirname(sourcePath), baseMatch[1]);
     const cleanedPath = `${basePath}-cleaned.png`;
 
-    // 1. Apply mask if provided, otherwise copy original
+    // 1. Apply mask if provided, otherwise copy source
     if (maskData) {
-      await applyMask(originalPath, maskData, cleanedPath);
+      await applyMask(sourcePath, maskData, cleanedPath);
     } else {
-      await fs.copyFile(originalPath, cleanedPath);
-      console.log(`[Server] No mask - copied original to cleaned`);
+      await fs.copyFile(sourcePath, cleanedPath);
+      console.log(`[Server] No mask - copied source to cleaned`);
     }
 
     // 2. Crop columns (if any)

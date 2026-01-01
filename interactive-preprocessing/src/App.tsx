@@ -69,7 +69,7 @@ const App: Component = () => {
     const page = currentPage();
     if (page && imageRef) {
       // Generate a unique page ID to detect actual page changes
-      const pageId = `${page.chapter}:${page.pageNum}`;
+      const pageId = `${page.chapter}:${page.pageNum}:${page.isPreprocessed ? 'preprocessed' : 'original'}`;
 
       // Only reload image if we're actually changing pages (not just updating columns)
       if (pageId !== currentPageId()) {
@@ -556,8 +556,13 @@ const App: Component = () => {
   return (
     <div class="app">
       {/* Header */}
-      <header style="background: #3b82f6; color: white; padding: 1rem;">
-        <h1 style="font-size: 1.5rem; font-weight: bold;">Interactive Preprocessing - HarbingerHouse</h1>
+      <header style="background: #3b82f6; color: white; padding: 1rem; display: flex; align-items: center; gap: 1rem;">
+        <h1 style="font-size: 1.5rem; font-weight: bold; flex: 1;">Interactive Preprocessing - HarbingerHouse</h1>
+        <Show when={currentPage()}>
+          <div style={`padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; ${currentPage()?.isPreprocessed ? 'background: #10b981; color: white;' : 'background: #f59e0b; color: white;'}`}>
+            {currentPage()?.isPreprocessed ? '✓ Auto-Preprocessed' : '⚠ Original (Unprocessed)'}
+          </div>
+        </Show>
       </header>
 
       {/* Toolbar */}

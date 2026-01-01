@@ -15,6 +15,7 @@ export interface Page {
   columns: Column[];
   maskData?: ImageData;
   processed: boolean;
+  isPreprocessed?: boolean; // Whether using auto-preprocessed image
 }
 
 export interface Session {
