@@ -1,0 +1,6 @@
+packages:
+  - interactive-server
+  - interactive-preprocessing
+
+onlyBuiltDependencies:
+  - esbuild

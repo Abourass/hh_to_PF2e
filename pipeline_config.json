@@ -15,6 +15,13 @@
     "level": "12%,88%,1.1",
     "morphology": null
   },
+
+  "interactive_preprocessing": {
+    "_comment": "Manual column selection and image cleanup for improved OCR accuracy. Set enabled:true to activate.",
+    "enabled": true,
+    "auto_open_browser": true,
+    "preserve_originals": true
+  },
   
   "ocr": {
     "_comment": "PSM 6 = single uniform block (better for scanned pages), OEM 1 = LSTM only (more accurate than legacy fallback)",

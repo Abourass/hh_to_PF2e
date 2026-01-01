@@ -13,6 +13,7 @@ set -g OUTPUT_ROOT ""
 set -g DPI 300
 set -g AUTO_DETECT false
 set -g PARALLEL_JOBS 4
+set -g STAGE "all"  # Can be: extract, preprocess, ocr, combine, all
 
 # ============================================================================
 # LOGGING
@@ -235,17 +236,24 @@ function convert_chapters
         end
         
         # Convert chapter using the improved converter
-        set convert_args $chapter_pdf $chapter_output --dpi $DPI --jobs $PARALLEL_JOBS
-        
+        set convert_args $chapter_pdf $chapter_output --dpi $DPI --jobs $PARALLEL_JOBS --stage $STAGE
+
         if test -n "$CONFIG_FILE"
             set convert_args $convert_args --config $CONFIG_FILE
         end
-        
+
+        if set -q DEMO_MODE
+            set convert_args $convert_args --demo
+        end
+
         if ./harbinger_convert.fish $convert_args
-            chapter_checkpoint_mark $chapter_name
-            log_info "Chapter $chapter_name complete"
+            # Only mark complete if running all stages or final stage (combine)
+            if test "$STAGE" = "all"; or test "$STAGE" = "combine"
+                chapter_checkpoint_mark $chapter_name
+            end
+            log_info "Chapter $chapter_name complete (stage: $STAGE)"
         else
-            log_error "Chapter $chapter_name failed"
+            log_error "Chapter $chapter_name failed (stage: $STAGE)"
             set failed (math $failed + 1)
         end
         
@@ -301,6 +309,9 @@ function parse_args
             case --jobs -j
                 set i (math $i + 1)
                 set -g PARALLEL_JOBS $argv[$i]
+            case --stage
+                set i (math $i + 1)
+                set -g STAGE $argv[$i]
             case --auto
                 set -g AUTO_DETECT true
             case --clean
@@ -341,6 +352,7 @@ if test -z "$PDF_FILE"
     echo "  --output, -o DIR    Output root directory"
     echo "  --dpi NUM           DPI for extraction (default: 300)"
     echo "  --jobs, -j NUM      Parallel jobs per chapter (default: 4)"
+    echo "  --stage STAGE       Run specific stage: extract, preprocess, ocr, combine, all (default: all)"
     echo "  --auto              Auto-detect chapters from PDF bookmarks"
     echo "  --clean             Clear checkpoints and reconvert all"
     echo "  --list              List chapters without converting"
@@ -350,6 +362,11 @@ if test -z "$PDF_FILE"
     echo '  {"chapters": [{"name": "intro", "pages": "1-5"}, ...]}'
     echo ""
     echo "Or use --auto to extract from PDF bookmarks"
+    echo ""
+    echo "Note: Use --stage to run specific pipeline stages. This allows you to:"
+    echo "  1. Extract and preprocess images (--stage preprocess)"
+    echo "  2. Run interactive preprocessing"
+    echo "  3. Run OCR on cleaned images (--stage ocr)"
     exit 1
 end
 

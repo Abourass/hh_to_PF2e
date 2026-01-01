@@ -299,21 +299,22 @@ function parse_args
 end
 
 # ============================================================================
-# STEP: PDF CONVERSION (CHAPTERS)
+# STEP: PDF EXTRACTION AND AUTO-PREPROCESSING
 # ============================================================================
 
-function step_convert_chapters
-    show_pipeline_progress "STEP 1: PDF Conversion"
-    
-    if master_checkpoint_exists "chapters"
-        log_substep "Using cached conversion (--clean to reconvert)"
-        set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/converted.md 2>/dev/null)
+function step_extract_and_preprocess
+    show_pipeline_progress "STEP 1: Extract & Auto-Preprocess"
+
+    if master_checkpoint_exists "extract_preprocess"
+        log_substep "Using cached extraction & preprocessing (--clean to redo)"
+        set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/.pipeline_state.json 2>/dev/null)
         log_complete
         return 0
     end
-    
-    # Use batch_convert.fish
-    set batch_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS
+
+    # Use batch_convert.fish with preprocess stage
+    # This runs: extract images -> auto-preprocessing (deskew, despeckle, etc.)
+    set batch_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS --stage preprocess
 
     if test -n "$CONFIG_FILE"
         set batch_args $batch_args --config $CONFIG_FILE
@@ -322,31 +323,115 @@ function step_convert_chapters
     if set -q DEMO_MODE
         set batch_args $batch_args --demo
     end
-    
-    if set -q RESUME_MODE
-        # Don't add --clean, let chapter checkpoints work
-        true
-    else if not set -q CLEAN_MODE
-        # Normal mode - use chapter checkpoints
-        true
-    end
-    
-    log_substep "Running batch conversion..."
-    
+
+    log_substep "Extracting and preprocessing images..."
+
     if ./batch_convert.fish $batch_args
-        master_checkpoint_mark "chapters"
-        set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/converted.md 2>/dev/null)
-        log_substep "Converted $TOTAL_CHAPTERS chapters"
+        master_checkpoint_mark "extract_preprocess"
+        set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/.pipeline_state.json 2>/dev/null)
+        log_substep "Extracted & preprocessed $TOTAL_CHAPTERS chapters"
     else
-        log_error "Batch conversion failed"
+        log_error "Extract/preprocess failed"
         return 1
     end
-    
+
     log_complete
 end
 
 # ============================================================================
-# STEP: REPROCESS LOW-CONFIDENCE REGIONS (Optional)
+# STEP: OCR (AFTER INTERACTIVE PREPROCESSING)
+# ============================================================================
+
+function step_ocr_chapters
+    show_pipeline_progress "STEP 3: OCR"
+
+    if master_checkpoint_exists "ocr"
+        log_substep "Using cached OCR results (--clean to re-OCR)"
+        log_complete
+        return 0
+    end
+
+    # Use batch_convert.fish with ocr+combine stages
+    # This runs: OCR (on preprocessed/cleaned images) -> combine output
+    set batch_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS
+
+    # Build stage list: ocr and combine
+    # We need to run these separately to maintain checkpoints
+
+    if test -n "$CONFIG_FILE"
+        set batch_args $batch_args --config $CONFIG_FILE
+    end
+
+    if set -q DEMO_MODE
+        set batch_args $batch_args --demo
+    end
+
+    # First run OCR stage
+    log_substep "Running OCR on preprocessed images..."
+
+    if ./batch_convert.fish $batch_args --stage ocr
+        log_substep "OCR complete, combining output..."
+
+        # Then run combine stage
+        if ./batch_convert.fish $batch_args --stage combine
+            master_checkpoint_mark "ocr"
+            set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/converted.md 2>/dev/null)
+            log_substep "OCR'd $TOTAL_CHAPTERS chapters"
+        else
+            log_error "Combine failed"
+            return 1
+        end
+    else
+        log_error "OCR failed"
+        return 1
+    end
+
+    log_complete
+end
+
+# ============================================================================
+# STEP: INTERACTIVE PREPROCESSING (Optional, runs AFTER auto-preprocessing)
+# ============================================================================
+
+function step_interactive_preprocessing
+    show_pipeline_progress "STEP 2: Interactive Preprocessing"
+
+    if master_checkpoint_exists "interactive_preprocessing"
+        log_substep "Using cached interactive preprocessing"
+        log_complete
+        return 0
+    end
+
+    # Check if enabled
+    set interactive_enabled false
+    if test -n "$CONFIG_FILE"; and command -v jq &>/dev/null
+        set interactive_enabled (jq -r '.interactive_preprocessing.enabled // false' $CONFIG_FILE)
+    end
+
+    if test "$interactive_enabled" != "true"
+        show_pipeline_progress "STEP 2: Interactive Preprocessing [SKIPPED]"
+        log_complete
+        return 0
+    end
+
+    log_substep "Starting interactive preprocessing session..."
+    log_warn "Browser will open. Draw columns and clean images, then click 'Finish'."
+    log_substep "This runs BEFORE OCR for maximum effectiveness!"
+
+    ./interactive_preprocessing_server.fish $OUTPUT_ROOT $CONFIG_FILE
+
+    if test $status -eq 0
+        master_checkpoint_mark "interactive_preprocessing"
+        log_complete
+        return 0
+    else
+        log_error "Interactive preprocessing cancelled"
+        return 1
+    end
+end
+
+# ============================================================================
+# STEP: REPROCESS LOW-CONFIDENCE REGIONS (Optional, runs AFTER OCR)
 # ============================================================================
 
 function step_reprocess_lowconf
@@ -355,32 +440,32 @@ function step_reprocess_lowconf
     if test -n "$CONFIG_FILE"; and command -v jq &>/dev/null
         set reprocess_threshold (jq -r '.ocr.reprocess_threshold // 0' $CONFIG_FILE)
     end
-    
+
     if test "$reprocess_threshold" -eq 0
-        show_pipeline_progress "STEP 1.5: Reprocess Low-Conf [SKIPPED]"
+        show_pipeline_progress "STEP 3.5: Reprocess Low-Conf [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 1.5: Reprocess Low-Confidence Regions"
-    
+
+    show_pipeline_progress "STEP 3.5: Reprocess Low-Confidence Regions"
+
     if master_checkpoint_exists "reprocess_lowconf"
         log_substep "Using cached reprocessing"
         log_complete
         return 0
     end
-    
+
     # Check if script exists
     if not test -f "./reprocess_lowconf_regions.fish"
         log_warn "reprocess_lowconf_regions.fish not found, skipping"
         log_complete
         return 0
     end
-    
+
     log_substep "Reprocessing regions below $reprocess_threshold% confidence..."
-    
+
     ./reprocess_lowconf_regions.fish $OUTPUT_ROOT --threshold $reprocess_threshold
-    
+
     master_checkpoint_mark "reprocess_lowconf"
     log_complete
 end
@@ -391,12 +476,12 @@ end
 
 function step_ocr_cleanup
     if not test $DO_CLEANUP = true
-        show_pipeline_progress "STEP 2: OCR Cleanup [SKIPPED]"
+        show_pipeline_progress "STEP 4: OCR Cleanup [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 2: OCR Cleanup"
+
+    show_pipeline_progress "STEP 4: OCR Cleanup"
     
     if master_checkpoint_exists "cleanup"
         log_substep "Using cached cleanup"
@@ -486,12 +571,12 @@ end
 
 function step_dictionary_cleanup
     if not test $DO_DICT = true
-        show_pipeline_progress "STEP 3: Dictionary Corrections [SKIPPED]"
+        show_pipeline_progress "STEP 5: Dictionary Corrections [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 3: Dictionary Corrections"
+
+    show_pipeline_progress "STEP 5: Dictionary Corrections"
     
     if master_checkpoint_exists "dictionary"
         log_substep "Using cached dictionary corrections"
@@ -564,12 +649,12 @@ end
 
 function step_learned_corrections
     if not test $DO_LEARNED_CORRECTIONS = true
-        show_pipeline_progress "STEP 3.5: Learned Corrections [SKIPPED]"
+        show_pipeline_progress "STEP 5.5: Learned Corrections [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 3.5: Learned Corrections"
+
+    show_pipeline_progress "STEP 5.5: Learned Corrections"
     
     if master_checkpoint_exists "learned_corrections"
         log_substep "Using cached learned corrections"
@@ -624,12 +709,12 @@ end
 
 function step_ai_cleanup
     if not test $DO_AI_CLEANUP = true
-        show_pipeline_progress "STEP 4: AI Cleanup [SKIPPED]"
+        show_pipeline_progress "STEP 6: AI Cleanup [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 4: AI Cleanup ($AI_BACKEND)"
+
+    show_pipeline_progress "STEP 6: AI Cleanup ($AI_BACKEND)"
     
     if master_checkpoint_exists "ai_cleanup"
         log_substep "Using cached AI cleanup"
@@ -685,12 +770,12 @@ end
 
 function step_extract_statblocks
     if not test $EXTRACT_STATBLOCKS = true
-        show_pipeline_progress "STEP 5: Stat Block Extraction [SKIPPED]"
+        show_pipeline_progress "STEP 7: Stat Block Extraction [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 5: Stat Block Extraction"
+
+    show_pipeline_progress "STEP 7: Stat Block Extraction"
     
     if master_checkpoint_exists "statblocks"
         log_substep "Using cached stat blocks"
@@ -743,7 +828,7 @@ end
 # ============================================================================
 
 function step_finalize
-    show_pipeline_progress "STEP 6: Finalizing Output"
+    show_pipeline_progress "STEP 8: Finalizing Output"
     
     mkdir -p $FINAL_OUTPUT
     
@@ -791,7 +876,7 @@ end
 # ============================================================================
 
 function step_generate_stats
-    show_pipeline_progress "STEP 7: Generating Statistics"
+    show_pipeline_progress "STEP 9: Generating Statistics"
     
     set END_TIME (date +%s)
     set ELAPSED (math $END_TIME - $START_TIME)
@@ -852,12 +937,12 @@ end
 
 function step_archive_diagnostics
     if not test $ARCHIVE_DIAGNOSTICS = true
-        show_pipeline_progress "STEP 8: Archive Diagnostics [SKIPPED]"
+        show_pipeline_progress "STEP 10: Archive Diagnostics [SKIPPED]"
         log_complete
         return 0
     end
-    
-    show_pipeline_progress "STEP 8: Archive Diagnostics"
+
+    show_pipeline_progress "STEP 10: Archive Diagnostics"
     
     if master_checkpoint_exists "diagnostics"
         log_substep "Diagnostics already archived"
@@ -1063,8 +1148,15 @@ function show_pipeline_progress
     echo (set_color cyan)"┌─["(set_color yellow)" $step_name "(set_color cyan)"] "(set_color blue)"$progress_bar"(set_color normal)" "(set_color yellow)"$eta_str"(set_color normal) >&2
 end
 
-# Run pipeline steps
-step_convert_chapters
+# Run pipeline steps in correct order
+# NEW ORDER: Extract -> Auto-Preprocess -> Interactive Preprocess -> OCR -> Text Cleanup
+step_extract_and_preprocess
+or exit 1
+
+step_interactive_preprocessing
+or exit 1
+
+step_ocr_chapters
 or exit 1
 
 step_reprocess_lowconf

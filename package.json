@@ -1,8 +1,16 @@
 {
-  "name": "harbinger-house-converter",
+  "name": "harbinger-house",
   "version": "2.0.0",
-  "description": "PDF to Markdown conversion pipeline for tabletop RPG books",
+  "description": "PDF to Markdown conversion pipeline for tabletop RPG books with interactive preprocessing",
+  "private": true,
   "scripts": {
+    "install:all": "pnpm install",
+    "dev": "pnpm --parallel --stream --filter './interactive-*' run dev",
+    "dev:server": "pnpm --filter interactive-server dev",
+    "dev:ui": "pnpm --filter interactive-preprocessing dev",
+    "build:ui": "pnpm --filter interactive-preprocessing build",
+    "start:server": "pnpm --filter interactive-server start",
+    "interactive": "fish ./interactive_preprocessing_server.fish",
     "convert": "./harbinger_master.fish --config pipeline_config.json",
     "convert:demo": "./harbinger_master.fish --config pipeline_config.json --demo",
     "convert:clean": "./harbinger_master.fish --config pipeline_config.json --clean",
@@ -21,12 +29,18 @@
     "rpg",
     "dnd",
     "planescape",
-    "conversion"
+    "conversion",
+    "interactive",
+    "preprocessing"
   ],
   "author": "",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Abourass/hh_to_PF2e.git"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
   }
 }

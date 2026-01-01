@@ -11,6 +11,7 @@ set -g PDF_FILE ""
 set -g OUTPUT_DIR ""
 set -g CONFIG_FILE ""
 set -g TEMP_DIR ""
+set -g STAGE "all"  # Can be: extract, preprocess, ocr, combine, all
 
 # Defaults (can be overridden by config)
 # v2.0: Gentler preprocessing to reduce OCR artifacts
@@ -268,117 +269,266 @@ function preprocess_image
 end
 
 # ============================================================================
-# PARALLEL PAGE PROCESSOR
+# PARALLEL PAGE PROCESSOR - PREPROCESSING STAGE
 # ============================================================================
 
-function process_single_page
+function preprocess_single_page
     set img $argv[1]
     set temp_dir $argv[2]
     set basename (basename $img .png)
-    
-    # Preprocess
+
+    # Skip if interactive preprocessing artifacts exist (user already cleaned)
+    set cleaned_img $temp_dir/$basename-cleaned.png
+    set column_1_img $temp_dir/$basename-column-1.png
+
+    if test -f $cleaned_img; or test -f $column_1_img
+        # Interactive preprocessing already done, skip auto-preprocessing
+        echo "done" > $temp_dir/$basename-preprocess.complete
+        return 0
+    end
+
+    # Run auto-preprocessing
     preprocess_image $img $temp_dir/$basename-processed.png
-    
-    # Build tesseract command with configurable params
-    set tess_args $temp_dir/$basename-processed.png $temp_dir/$basename
-    set tess_args $tess_args -l $OCR_LANGUAGE
-    set tess_args $tess_args --psm $OCR_PSM
-    set tess_args $tess_args --oem $OCR_OEM
-    
-    # Add user words if configured
-    if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
-        set tess_args $tess_args --user-words $OCR_USER_WORDS
-    end
-    
-    # OCR with confidence output (TSV format)
-    tesseract $tess_args tsv 2>/dev/null
-    
-    # Also get plain text (same params)
-    set tess_text_args $temp_dir/$basename-processed.png $temp_dir/$basename-text
-    set tess_text_args $tess_text_args -l $OCR_LANGUAGE
-    set tess_text_args $tess_text_args --psm $OCR_PSM
-    set tess_text_args $tess_text_args --oem $OCR_OEM
-    
-    if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
-        set tess_text_args $tess_text_args --user-words $OCR_USER_WORDS
-    end
-    
-    tesseract $tess_text_args txt 2>/dev/null
-    
-    # Extract low-confidence words for review
-    if test -f $temp_dir/$basename.tsv
-        awk -F'\t' -v threshold=$OCR_CONFIDENCE_THRESHOLD \
-            'NR > 1 && $11 != "" && $11 < threshold && $12 != "" {
-                print $12 " (conf: " $11 ")"
-            }' $temp_dir/$basename.tsv > $temp_dir/$basename-lowconf.txt
-    end
-    
-    echo "done" > $temp_dir/$basename.complete
+
+    echo "done" > $temp_dir/$basename-preprocess.complete
 end
 
-function process_pages_parallel
+function preprocess_pages_parallel
     set temp_dir $argv[1]
     set page_files $temp_dir/page-*.png
     set total_pages (count $page_files)
     set processed 0
     set completed 0
-    
-    log_substep "Processing $total_pages pages with $PARALLEL_JOBS parallel jobs..."
-    
-    # Initialize progress tracking
-    progress_start $total_pages "OCR pages"
-    
+
+    log_substep "Preprocessing $total_pages pages with $PARALLEL_JOBS parallel jobs..."
+
+    progress_start $total_pages "Preprocess images"
+
     for img in $page_files
         set basename (basename $img .png)
-        
-        # Skip if already processed (for resume capability)
-        if test -f $temp_dir/$basename.complete
+
+        # Skip if already preprocessed
+        if test -f $temp_dir/$basename-preprocess.complete
             set processed (math $processed + 1)
             set completed (math $completed + 1)
             progress_update $completed
             continue
         end
-        
+
         # Launch background job
-        process_single_page $img $temp_dir &
-        
+        preprocess_single_page $img $temp_dir &
+
         # Limit concurrent jobs
         while test (jobs -p | wc -l) -ge $PARALLEL_JOBS
-            # Check for newly completed jobs and update progress
-            set new_completed (count $temp_dir/*.complete 2>/dev/null)
+            set new_completed (count $temp_dir/*-preprocess.complete 2>/dev/null)
             if test $new_completed -gt $completed
                 set completed $new_completed
                 progress_update $completed
             end
             sleep 0.2
         end
-        
+
         set processed (math $processed + 1)
     end
-    
-    # Wait for all jobs to complete
+
+    # Wait for all jobs
     while test (jobs -p | wc -l) -gt 0
-        set new_completed (count $temp_dir/*.complete 2>/dev/null)
+        set new_completed (count $temp_dir/*-preprocess.complete 2>/dev/null)
         if test $new_completed -gt $completed
             set completed $new_completed
             progress_update $completed
         end
         sleep 0.3
     end
-    
-    # Final update
+
     progress_update $total_pages
     progress_finish
-    
-    log_substep "All $total_pages pages processed"
+
+    log_substep "All $total_pages pages preprocessed"
 end
 
 # ============================================================================
-# MAIN CONVERSION PIPELINE
+# PARALLEL PAGE PROCESSOR - OCR STAGE
 # ============================================================================
 
-function run_conversion
-    # Step 1: Extract PDF pages as images
+function ocr_single_page
+    set temp_dir $argv[1]
+    set basename $argv[2]
+
+    # Check for interactive preprocessing artifacts
+    set cleaned_img $temp_dir/$basename-cleaned.png
+    set column_1_img $temp_dir/$basename-column-1.png
+    set processed_img $temp_dir/$basename-processed.png
+    set original_img $temp_dir/$basename.png
+
+    # Determine which image(s) to use for OCR
+    if test -f $column_1_img
+        # Interactive preprocessing created column images - OCR each separately
+        log_substep "  Using interactive columns for $basename"
+
+        # Find all column images
+        set column_images
+        set col_num 1
+        while test -f $temp_dir/$basename-column-$col_num.png
+            set column_images $column_images $temp_dir/$basename-column-$col_num.png
+            set col_num (math $col_num + 1)
+        end
+
+        # OCR each column
+        set combined_text ""
+        set combined_tsv_header ""
+        set combined_lowconf ""
+
+        for col_idx in (seq 1 (count $column_images))
+            set col_img $column_images[$col_idx]
+            set col_base "$basename-col$col_idx"
+
+            # Run OCR on this column
+            set tess_args $col_img $temp_dir/$col_base
+            set tess_args $tess_args -l $OCR_LANGUAGE
+            set tess_args $tess_args --psm $OCR_PSM
+            set tess_args $tess_args --oem $OCR_OEM
+
+            if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
+                set tess_args $tess_args --user-words $OCR_USER_WORDS
+            end
+
+            tesseract $tess_args tsv 2>/dev/null
+            tesseract $tess_args txt 2>/dev/null
+
+            # Append column text
+            if test -f $temp_dir/$col_base-text.txt
+                set combined_text "$combined_text\n\n<!-- COLUMN $col_idx -->\n\n"(cat $temp_dir/$col_base-text.txt)
+            end
+
+            # Extract low-confidence words from this column
+            if test -f $temp_dir/$col_base.tsv
+                awk -F'\t' -v threshold=$OCR_CONFIDENCE_THRESHOLD \
+                    'NR > 1 && $11 != "" && $11 < threshold && $12 != "" {
+                        print $12 " (conf: " $11 ")"
+                    }' $temp_dir/$col_base.tsv >> $temp_dir/$basename-lowconf.txt
+            end
+        end
+
+        # Write combined text
+        echo -e $combined_text > $temp_dir/$basename-text.txt
+
+    else if test -f $cleaned_img
+        # Interactive preprocessing created a cleaned image (no columns)
+        log_substep "  Using interactive cleaned image for $basename"
+
+        # Use cleaned image directly (already preprocessed by user)
+        set tess_args $cleaned_img $temp_dir/$basename
+        set tess_args $tess_args -l $OCR_LANGUAGE
+        set tess_args $tess_args --psm $OCR_PSM
+        set tess_args $tess_args --oem $OCR_OEM
+
+        if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
+            set tess_args $tess_args --user-words $OCR_USER_WORDS
+        end
+
+        tesseract $tess_args tsv 2>/dev/null
+        tesseract $tess_args txt 2>/dev/null
+
+        # Extract low-confidence words
+        if test -f $temp_dir/$basename.tsv
+            awk -F'\t' -v threshold=$OCR_CONFIDENCE_THRESHOLD \
+                'NR > 1 && $11 != "" && $11 < threshold && $12 != "" {
+                    print $12 " (conf: " $11 ")"
+                }' $temp_dir/$basename.tsv > $temp_dir/$basename-lowconf.txt
+        end
+
+    else if test -f $processed_img
+        # Auto-preprocessed image exists
+        set tess_args $processed_img $temp_dir/$basename
+        set tess_args $tess_args -l $OCR_LANGUAGE
+        set tess_args $tess_args --psm $OCR_PSM
+        set tess_args $tess_args --oem $OCR_OEM
+
+        if test -n "$OCR_USER_WORDS"; and test -f "$OCR_USER_WORDS"
+            set tess_args $tess_args --user-words $OCR_USER_WORDS
+        end
+
+        tesseract $tess_args tsv 2>/dev/null
+        tesseract $tess_args txt 2>/dev/null
+
+        # Extract low-confidence words
+        if test -f $temp_dir/$basename.tsv
+            awk -F'\t' -v threshold=$OCR_CONFIDENCE_THRESHOLD \
+                'NR > 1 && $11 != "" && $11 < threshold && $12 != "" {
+                    print $12 " (conf: " $11 ")"
+                }' $temp_dir/$basename.tsv > $temp_dir/$basename-lowconf.txt
+        end
+    else
+        log_warn "No preprocessed image found for $basename, skipping OCR"
+        return 1
+    end
+
+    echo "done" > $temp_dir/$basename-ocr.complete
+end
+
+function ocr_pages_parallel
+    set temp_dir $argv[1]
+    set page_files $temp_dir/page-*.png
+    set total_pages (count $page_files)
+    set processed 0
+    set completed 0
+
+    log_substep "OCR $total_pages pages with $PARALLEL_JOBS parallel jobs..."
+
+    # Initialize progress tracking
+    progress_start $total_pages "OCR pages"
+
+    for img in $page_files
+        set basename (basename $img .png)
+
+        # Skip if already OCR'd (for resume capability)
+        if test -f $temp_dir/$basename-ocr.complete
+            set processed (math $processed + 1)
+            set completed (math $completed + 1)
+            progress_update $completed
+            continue
+        end
+
+        # Launch background job
+        ocr_single_page $temp_dir $basename &
+
+        # Limit concurrent jobs
+        while test (jobs -p | wc -l) -ge $PARALLEL_JOBS
+            # Check for newly completed jobs and update progress
+            set new_completed (count $temp_dir/*-ocr.complete 2>/dev/null)
+            if test $new_completed -gt $completed
+                set completed $new_completed
+                progress_update $completed
+            end
+            sleep 0.2
+        end
+
+        set processed (math $processed + 1)
+    end
+
+    # Wait for all jobs to complete
+    while test (jobs -p | wc -l) -gt 0
+        set new_completed (count $temp_dir/*-ocr.complete 2>/dev/null)
+        if test $new_completed -gt $completed
+            set completed $new_completed
+            progress_update $completed
+        end
+        sleep 0.3
+    end
+
+    # Final update
+    progress_update $total_pages
+    progress_finish
+
+    log_substep "All $total_pages pages OCR'd"
+end
+
+# ============================================================================
+# MAIN CONVERSION PIPELINE - STAGED EXECUTION
+# ============================================================================
+
+function stage_extract
     if checkpoint_exists "extract"
         log_step "STEP 1: PDF Extraction [CACHED]"
         log_substep "Using cached extraction from previous run"
@@ -398,49 +548,73 @@ function run_conversion
 
         checkpoint_mark "extract"
     end
-    
+
     log_complete
-    
-    # Step 2: Preprocess and OCR (parallel)
+end
+
+function stage_preprocess
+    if checkpoint_exists "preprocess"
+        log_step "STEP 2: Auto-Preprocessing [CACHED]"
+        log_substep "Using cached preprocessing from previous run"
+    else
+        log_step "STEP 2: Auto-Preprocessing"
+
+        preprocess_pages_parallel $TEMP_DIR
+
+        checkpoint_mark "preprocess"
+    end
+
+    log_complete
+end
+
+function stage_ocr
     if checkpoint_exists "ocr"
-        log_step "STEP 2: Preprocessing & OCR [CACHED]"
+        log_step "STEP 3: OCR [CACHED]"
         log_substep "Using cached OCR results from previous run"
     else
-        log_step "STEP 2: Preprocessing & OCR (Parallel)"
-        
-        process_pages_parallel $TEMP_DIR
-        
+        log_step "STEP 3: OCR (Parallel)"
+
+        ocr_pages_parallel $TEMP_DIR
+
         checkpoint_mark "ocr"
     end
-    
+
     log_complete
-    
-    # Step 3: Combine OCR output
-    log_step "STEP 3: Combining Output"
-    
+end
+
+function stage_combine
+    if checkpoint_exists "combine"
+        log_step "STEP 4: Combining Output [CACHED]"
+        log_substep "Using cached combined output from previous run"
+        log_complete
+        return 0
+    end
+
+    log_step "STEP 4: Combining Output"
+
     set combined_text $TEMP_DIR/combined.txt
     set confidence_report $OUTPUT_DIR/ocr_confidence_report.txt
-    
+
     echo "" > $combined_text
-    
+
     if test "$OUTPUT_CONFIDENCE_REPORT" = "true"
         echo "# OCR Confidence Report" > $confidence_report
         echo "Generated: "(date) >> $confidence_report
         echo "Threshold: $OCR_CONFIDENCE_THRESHOLD%" >> $confidence_report
         echo "" >> $confidence_report
     end
-    
+
     # Sort pages numerically and combine
     for txt_file in (ls $TEMP_DIR/page-*-text.txt 2>/dev/null | sort -V)
         set basename (basename $txt_file -text.txt)
-        
+
         # Add page break marker
         echo "" >> $combined_text
         echo "<!-- PAGE BREAK: $basename -->" >> $combined_text
         echo "" >> $combined_text
-        
+
         cat $txt_file >> $combined_text
-        
+
         # Add low-confidence words to report
         if test "$OUTPUT_CONFIDENCE_REPORT" = "true"
             set lowconf_file $TEMP_DIR/$basename-lowconf.txt
@@ -451,21 +625,17 @@ function run_conversion
             end
         end
     end
-    
+
     log_substep "Combined OCR output created"
-    
+
     if test "$OUTPUT_CONFIDENCE_REPORT" = "true"
         set low_conf_count (wc -l < $confidence_report)
         log_substep "Confidence report: $low_conf_count low-confidence items flagged"
     end
-    
-    log_complete
-    
-    # Step 4: Basic text cleanup and markdown creation
-    log_step "STEP 4: Creating Markdown"
-    
+
+    # Create markdown
     set final_md $OUTPUT_DIR/converted.md
-    
+
     # Add frontmatter
     echo "# "(basename $PDF_FILE .pdf)" - Converted Content" > $final_md
     echo "" >> $final_md
@@ -474,7 +644,7 @@ function run_conversion
     echo "" >> $final_md
     echo "---" >> $final_md
     echo "" >> $final_md
-    
+
     # Basic encoding cleanup and append
     cat $combined_text | \
         sed -e 's/â€™/'\''/g' \
@@ -486,11 +656,36 @@ function run_conversion
             -e 's/Â//g' \
             -e 's/â€¢/•/g' \
             -e 's/  */ /g' >> $final_md
-    
+
     log_substep "Markdown output: $final_md"
-    
-    checkpoint_mark "cleanup"
+
+    checkpoint_mark "combine"
     log_complete
+end
+
+function run_conversion
+    # Run based on STAGE variable
+    switch $STAGE
+        case "extract"
+            stage_extract
+        case "preprocess"
+            stage_preprocess
+        case "ocr"
+            stage_ocr
+        case "combine"
+            stage_combine
+        case "all"
+            # Run all stages in sequence
+            stage_extract
+            stage_preprocess
+            # Note: Interactive preprocessing happens externally between preprocess and ocr
+            stage_ocr
+            stage_combine
+        case "*"
+            log_error "Invalid stage: $STAGE"
+            log_error "Valid stages: extract, preprocess, ocr, combine, all"
+            return 1
+    end
 end
 
 # ============================================================================
@@ -510,6 +705,9 @@ function parse_args
             case --jobs -j
                 set i (math $i + 1)
                 set -g PARALLEL_JOBS $argv[$i]
+            case --stage
+                set i (math $i + 1)
+                set -g STAGE $argv[$i]
             case --resume
                 # Don't clear checkpoints
                 set -g RESUME_MODE true
@@ -557,13 +755,20 @@ if test -z "$PDF_FILE"
     echo "  --config, -c FILE    Use JSON config file"
     echo "  --dpi NUM            DPI for extraction (default: 300)"
     echo "  --jobs, -j NUM       Parallel jobs (default: 4)"
+    echo "  --stage STAGE        Run specific stage: extract, preprocess, ocr, combine, all (default: all)"
     echo "  --resume             Resume from last checkpoint"
     echo "  --clean              Clear checkpoints and start fresh"
     echo "  --status             Show checkpoint status only"
     echo "  --demo               Demo mode: only process first page"
     echo ""
-    echo "Example:"
+    echo "Examples:"
+    echo "  # Full pipeline (all stages):"
     echo "  ./harbinger_convert.fish book.pdf output/ --config pipeline_config.json"
+    echo ""
+    echo "  # Run specific stages:"
+    echo "  ./harbinger_convert.fish book.pdf output/ --stage extract"
+    echo "  ./harbinger_convert.fish book.pdf output/ --stage preprocess"
+    echo "  ./harbinger_convert.fish book.pdf output/ --stage ocr"
     exit 1
 end
 
@@ -626,10 +831,18 @@ set START_TIME (date +%s)
 run_conversion
 
 # Cleanup temp files (but keep checkpoints)
-log_step "Cleanup"
-rm -f $TEMP_DIR/page-*.png $TEMP_DIR/*-processed.png 2>/dev/null
-log_substep "Temporary images removed (checkpoints preserved)"
-log_complete
+# Only cleanup images if we completed OCR or running full pipeline
+# This preserves images for interactive preprocessing
+if test "$STAGE" = "all"; or test "$STAGE" = "combine"
+    log_step "Cleanup"
+    rm -f $TEMP_DIR/page-*.png $TEMP_DIR/*-processed.png 2>/dev/null
+    log_substep "Temporary images removed (checkpoints preserved)"
+    log_complete
+else
+    log_step "Cleanup"
+    log_substep "Preserving images for interactive preprocessing"
+    log_complete
+end
 
 # Final report
 set END_TIME (date +%s)
