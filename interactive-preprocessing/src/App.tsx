@@ -39,7 +39,28 @@ const App: Component = () => {
     // Set up mask data getter
     setMaskDataGetter(() => {
       if (!maskCanvasRef) return undefined;
-      return maskCanvasRef.toDataURL();
+
+      // Invert the mask before sending to backend
+      // User paints areas to REMOVE, but backend expects:
+      // - White = keep
+      // - Black = erase
+      // So we need to invert: painted areas become black, unpainted become white
+      const invertCanvas = document.createElement('canvas');
+      invertCanvas.width = maskCanvasRef.width;
+      invertCanvas.height = maskCanvasRef.height;
+      const invertCtx = invertCanvas.getContext('2d');
+
+      if (!invertCtx) return undefined;
+
+      // Fill with white (keep everything by default)
+      invertCtx.fillStyle = '#ffffff';
+      invertCtx.fillRect(0, 0, invertCanvas.width, invertCanvas.height);
+
+      // Subtract painted areas (they become black/erased)
+      invertCtx.globalCompositeOperation = 'destination-out';
+      invertCtx.drawImage(maskCanvasRef, 0, 0);
+
+      return invertCanvas.toDataURL();
     });
   });
 
