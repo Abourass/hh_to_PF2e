@@ -535,17 +535,75 @@ function stage_extract
     else
         log_step "STEP 1: PDF Extraction"
 
+        # Get total page count for progress
+        set total_pages 0
+        if command -v pdfinfo &>/dev/null
+            set total_pages (pdfinfo $PDF_FILE 2>/dev/null | grep "Pages:" | awk '{print $2}')
+        end
+        if test -z "$total_pages"; or test "$total_pages" = "0"
+            set total_pages 1
+        end
+
         if set -q DEMO_MODE
             log_substep "DEMO MODE: Extracting first page only at $DPI DPI..."
-            pdftoppm -png -r $DPI -f 1 -l 1 $PDF_FILE $TEMP_DIR/page
+            set total_pages 1
+        end
+
+        log_substep "Extracting $total_pages pages at $DPI DPI (using pdftocairo)..."
+        progress_start $total_pages "Extracting pages"
+
+        # Use pdftocairo with JPEG for faster extraction (2-3x faster than pdftoppm PNG)
+        # Falls back to pdftoppm if pdftocairo not available
+        if command -v pdftocairo &>/dev/null
+            if set -q DEMO_MODE
+                pdftocairo -jpeg -r $DPI -f 1 -l 1 $PDF_FILE $TEMP_DIR/page 2>/dev/null &
+            else
+                pdftocairo -jpeg -r $DPI $PDF_FILE $TEMP_DIR/page 2>/dev/null &
+            end
         else
-            log_substep "Extracting pages at $DPI DPI..."
-            pdftoppm -png -r $DPI $PDF_FILE $TEMP_DIR/page
+            log_warn "pdftocairo not found, falling back to pdftoppm (slower)"
+            if set -q DEMO_MODE
+                pdftoppm -jpeg -r $DPI -f 1 -l 1 $PDF_FILE $TEMP_DIR/page 2>/dev/null &
+            else
+                pdftoppm -jpeg -r $DPI $PDF_FILE $TEMP_DIR/page 2>/dev/null &
+            end
+        end
+
+        set extract_pid $last_pid
+
+        # Monitor progress by counting extracted files
+        set extracted_count 0
+        while kill -0 $extract_pid 2>/dev/null
+            set new_count (count $TEMP_DIR/page-*.jpg 2>/dev/null)
+            if test $new_count -gt $extracted_count
+                set extracted_count $new_count
+                progress_update $extracted_count
+            end
+            sleep 0.3
+        end
+
+        # Wait for completion and get final count
+        wait $extract_pid
+
+        # Rename jpg to png for consistency with rest of pipeline
+        for jpg_file in $TEMP_DIR/page-*.jpg
+            if test -f $jpg_file
+                set png_file (string replace '.jpg' '.png' $jpg_file)
+                mv $jpg_file $png_file
+            end
         end
 
         set page_files $TEMP_DIR/page-*.png
-        log_substep "Extracted "(count $page_files)" pages"
+        set final_count (count $page_files)
+        progress_update $final_count
+        progress_finish
 
+        if test $final_count -eq 0
+            log_error "No pages extracted from PDF!"
+            return 1
+        end
+
+        log_substep "Extracted $final_count pages"
         checkpoint_mark "extract"
     end
 
@@ -553,12 +611,28 @@ function stage_extract
 end
 
 function stage_preprocess
+    # Ensure extraction has been done first
+    if not checkpoint_exists "extract"
+        stage_extract
+        or return 1
+    end
+
     if checkpoint_exists "preprocess"
         log_step "STEP 2: Auto-Preprocessing [CACHED]"
         log_substep "Using cached preprocessing from previous run"
     else
         log_step "STEP 2: Auto-Preprocessing"
 
+        # Validate that we have pages to preprocess
+        set page_files $TEMP_DIR/page-*.png
+        set page_count (count $page_files)
+
+        if test $page_count -eq 0
+            log_error "No pages found in $TEMP_DIR - extraction may have failed"
+            return 1
+        end
+
+        log_substep "Found $page_count pages to preprocess"
         preprocess_pages_parallel $TEMP_DIR
 
         checkpoint_mark "preprocess"
@@ -568,6 +642,16 @@ function stage_preprocess
 end
 
 function stage_ocr
+    # Ensure extraction and preprocessing have been done
+    if not checkpoint_exists "extract"
+        stage_extract
+        or return 1
+    end
+    if not checkpoint_exists "preprocess"
+        stage_preprocess
+        or return 1
+    end
+
     if checkpoint_exists "ocr"
         log_step "STEP 3: OCR [CACHED]"
         log_substep "Using cached OCR results from previous run"

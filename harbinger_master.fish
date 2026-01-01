@@ -312,28 +312,34 @@ function step_extract_and_preprocess
         return 0
     end
 
-    # Use batch_convert.fish with preprocess stage
-    # This runs: extract images -> auto-preprocessing (deskew, despeckle, etc.)
-    set batch_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS --stage preprocess
+    # Build base args
+    set base_args $PDF_FILE --output $OUTPUT_ROOT --dpi $DPI --jobs $PARALLEL_JOBS
 
     if test -n "$CONFIG_FILE"
-        set batch_args $batch_args --config $CONFIG_FILE
+        set base_args $base_args --config $CONFIG_FILE
     end
 
     if set -q DEMO_MODE
-        set batch_args $batch_args --demo
+        set base_args $base_args --demo
     end
 
-    log_substep "Extracting and preprocessing images..."
-
-    if ./batch_convert.fish $batch_args
-        master_checkpoint_mark "extract_preprocess"
-        set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/.pipeline_state.json 2>/dev/null)
-        log_substep "Extracted & preprocessed $TOTAL_CHAPTERS chapters"
-    else
-        log_error "Extract/preprocess failed"
+    # Stage 1: Extract images from PDF (using fast pdftocairo)
+    log_substep "Extracting images from PDF..."
+    if not ./batch_convert.fish $base_args --stage extract
+        log_error "Extraction failed"
         return 1
     end
+
+    # Stage 2: Auto-preprocess images (deskew, despeckle, etc.)
+    log_substep "Preprocessing images..."
+    if not ./batch_convert.fish $base_args --stage preprocess
+        log_error "Preprocessing failed"
+        return 1
+    end
+
+    master_checkpoint_mark "extract_preprocess"
+    set -g TOTAL_CHAPTERS (count $OUTPUT_ROOT/*/.pipeline_state.json 2>/dev/null)
+    log_substep "Extracted & preprocessed $TOTAL_CHAPTERS chapters"
 
     log_complete
 end
