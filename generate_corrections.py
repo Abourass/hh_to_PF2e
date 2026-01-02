@@ -15,6 +15,15 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from datetime import datetime
 
+# Try to import spell checker for dictionary validation
+try:
+    from spellchecker import SpellChecker
+    spell = SpellChecker()
+    HAS_SPELLCHECK = True
+except ImportError:
+    HAS_SPELLCHECK = False
+    print("Note: Install pyspellchecker for better accuracy: pip install pyspellchecker", file=sys.stderr)
+
 # Try to import tqdm for progress bars, fall back gracefully
 try:
     from tqdm import tqdm
@@ -95,6 +104,23 @@ def is_preserved_term(word: str) -> bool:
     return word.lower() in PRESERVE_TERMS
 
 
+def is_valid_word(word: str) -> bool:
+    """Check if word is a valid English word using dictionary"""
+    if not HAS_SPELLCHECK:
+        return False
+    
+    # Check the word as-is and lowercase
+    if spell.known([word]) or spell.known([word.lower()]):
+        return True
+    
+    # Check without trailing punctuation
+    clean_word = word.rstrip('.,;:!?')
+    if clean_word != word and (spell.known([clean_word]) or spell.known([clean_word.lower()])):
+        return True
+    
+    return False
+
+
 def is_garbage(word: str) -> bool:
     """Check if word matches garbage patterns"""
     for pattern in GARBAGE_PATTERNS:
@@ -140,23 +166,35 @@ def suggest_correction(word: str) -> str | None:
     if len(word) <= 2:
         return None
     
-    # Pattern-based suggestions - only for specific patterns
+    # NEW: Check if it's already a valid dictionary word
+    # If so, don't try to "fix" it even if it has low confidence
+    if is_valid_word(word):
+        return None
+    
+    # Pattern-based suggestions for clear OCR errors
     suggestion = word
     
-    # Only replace 0/1 in the middle of words (not standalone or at word boundaries)
-    # e.g., "0f" -> "of" but not "10" -> "lo"
+    # Only fix obvious OCR character errors
+    # 0 -> o at start of words
     if re.match(r'^0[a-z]+$', word, re.I):  # 0f -> of
         suggestion = 'o' + word[1:]
-    if re.match(r'^1[a-z]+$', word, re.I) and not word.startswith('1st') and not word.startswith('1d'):
-        suggestion = 'l' + word[1:]  # 1ady -> lady but not 1st or 1d6
+    # 1 -> l at start of words (but not 1st, 1d6, etc.)
+    elif re.match(r'^1[a-z]+$', word, re.I) and not word.startswith('1st') and not word.startswith('1d'):
+        suggestion = 'l' + word[1:]  # 1ady -> lady
+    # vv -> w (common OCR error)
+    elif 'vv' in word:
+        suggestion = word.replace('vv', 'w')
+    # rn -> m ligature ONLY if result is a valid word
+    elif 'rn' in word:
+        test_suggestion = re.sub(r'rn(?=[aeiouy])', 'm', word)
+        if test_suggestion != word and is_valid_word(test_suggestion):
+            suggestion = test_suggestion
     
-    # Common OCR ligature errors - only when clearly wrong
-    suggestion = re.sub(r'rn(?=[aeiouy])', 'm', suggestion)  # rna -> ma, but not rns
-    suggestion = re.sub(r'vv', 'w', suggestion)  # vvith -> with
-    # Don't do cl -> d, it's too aggressive (would break "clean", "close", etc.)
-    
+    # Only return suggestion if it differs and is valid
     if suggestion != word:
-        return suggestion
+        # Verify the suggestion is actually better (valid word or in known corrections)
+        if is_valid_word(suggestion) or suggestion in KNOWN_CORRECTIONS.values():
+            return suggestion
     
     return None
 
@@ -251,6 +289,7 @@ def generate_corrections_json(analysis: dict, min_occurrences: int) -> dict:
         
         suggestion = suggest_correction(word)
         if suggestion is not None:
+            # Store as: wrong_ocr_word -> correct_word (so sed replaces wrong with correct)
             corrections[word] = suggestion
     
     return {

@@ -41,7 +41,7 @@ sed -e 's/Facto1/Factol/g' \
     -e 's/Pl\/â™€/Pl\/♀/g' | \
 # Header cleanup (remove garbage characters)
 sed -e 's/\+HARBINGER\*\+/# HARBINGER/g' \
-    -e 's/+HOUSE +'\'''/HOUSE/g' \
+    -e "s/+HOUSE +'/HOUSE/g" \
     -e 's/CREDI\+S/CREDITS/g' \
     -e 's/BACKGR®UND/BACKGROUND/g' \
     -e 's/WHA\+ HAS GONE BEFORE/WHAT HAS GONE BEFORE/g' \
