@@ -230,8 +230,8 @@ function process_chapter
         end
         
         set page_name (basename $tsv_file .tsv)
-        # Extract page number, stripping 'page-' prefix and any column suffix (e.g., '-col1')
-        set page_num (string replace -r 'page-0*' '' $page_name | string replace -r -- '-col\d+$' '')
+        # Extract page number, stripping 'page-' prefix and any suffix (e.g., '-col1', '-processed')
+        set page_num (string replace -r 'page-0*' '' $page_name | string replace -r -- '-col\d+$|-processed$' '')
         
         # Find the corresponding image
         set page_image (find_page_image $temp_dir $page_num)
