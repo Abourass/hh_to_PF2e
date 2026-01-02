@@ -368,7 +368,8 @@ function ocr_single_page
     # Determine which image(s) to use for OCR
     if test -f $column_1_img
         # Interactive preprocessing created column images - OCR each separately
-        log_substep "  Using interactive columns for $basename"
+        # Write status to progress queue (for inline progress display)
+        progress_set_status "columns: $basename" "$temp_dir/.progress_status"
 
         # Find all column images
         set column_images
@@ -424,7 +425,8 @@ function ocr_single_page
 
     else if test -f $cleaned_img
         # Interactive preprocessing created a cleaned image (no columns)
-        log_substep "  Using interactive cleaned image for $basename"
+        # Write status to progress queue (for inline progress display)
+        progress_set_status "cleaned: $basename" "$temp_dir/.progress_status"
 
         # Use cleaned image directly (already preprocessed by user)
         set tess_args $cleaned_img $temp_dir/$basename
@@ -478,23 +480,22 @@ end
 
 function ocr_pages_parallel
     set temp_dir $argv[1]
-    # Only process original pages, not intermediate files
-    set page_files (find $temp_dir -name "page-*.png" \
-                    -not -name "*-processed.png" \
-                    -not -name "*-cleaned.png" \
-                    -not -name "*-column-*.png" | sort -V)
-    set total_pages (count $page_files)
+    
+    # Find unique page basenames from any page artifact (columns, cleaned, processed, or original)
+    set page_basenames (find $temp_dir -name "page-*.png" -o -name "page-*-column-*.png" -o -name "page-*-cleaned.png" | \
+                        sed 's/-column-[0-9]*\.png$//' | sed 's/-cleaned\.png$//' | sed 's/-processed\.png$//' | \
+                        sed 's/\.png$//' | sort -u | xargs -n1 basename)
+    
+    set total_pages (count $page_basenames)
     set processed 0
     set completed 0
 
     log_substep "OCR $total_pages pages with $PARALLEL_JOBS parallel jobs..."
 
-    # Initialize progress tracking
-    progress_start $total_pages "OCR pages"
+    # Initialize progress tracking with status file for parallel jobs
+    progress_start $total_pages "OCR pages" $temp_dir
 
-    for img in $page_files
-        set basename (basename $img .png)
-
+    for basename in $page_basenames
         # Skip if already OCR'd (for resume capability)
         if test -f $temp_dir/$basename-ocr.complete
             set processed (math $processed + 1)
