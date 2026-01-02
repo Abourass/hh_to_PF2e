@@ -136,6 +136,7 @@ end
 
 function crop_and_reocr_region
     # Crop a region from an image and re-run OCR
+    # Returns: new_text|confidence
     set image_file $argv[1]
     set left $argv[2]
     set top $argv[3]
@@ -159,6 +160,7 @@ function crop_and_reocr_region
     
     set crop_file "$output_dir/crop_$word_id.png"
     set text_file "$output_dir/reocr_$word_id.txt"
+    set tsv_file "$output_dir/reocr_$word_id.tsv"
     
     if test $DRY_RUN = true
         echo "[DRY-RUN] Would crop region $crop_left,$crop_top "$crop_width"x"$crop_height" from $image_file"
@@ -185,18 +187,115 @@ function crop_and_reocr_region
         -threshold 50% \
         $processed_crop 2>/dev/null
     
-    # Re-OCR with different settings
+    # Re-OCR with TSV output to get confidence scores
     if test -f "$processed_crop"
         tesseract $processed_crop $output_dir/reocr_$word_id \
             --psm 7 \
+            --oem 1 \
             -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'-" \
-            2>/dev/null
+            tsv 2>/dev/null
         
-        if test -f "$text_file"
-            set new_text (cat $text_file | string trim)
-            echo $new_text
-            return 0
+        if test -f "$tsv_file"
+            # Extract the text and confidence from TSV
+            set result (awk -F'\t' 'NR > 1 && $1 == 5 && length($12) > 0 {printf "%s|%.1f\n", $12, $11}' $tsv_file | head -n 1)
+            if test -n "$result"
+                echo $result
+                return 0
+            end
         end
+    end
+    
+    return 1
+end
+
+function is_valid_word
+    # Check if a word looks like a real word (not garbage)
+    set word $argv[1]
+    
+    # Reject empty
+    if test -z "$word"
+        return 1
+    end
+    
+    # Reject pure punctuation
+    if echo $word | grep -q '^[[:punct:][:space:]]*$'
+        return 1
+    end
+    
+    # Reject single characters (usually garbage)
+    if test (string length $word) -le 1
+        return 1
+    end
+    
+    # Reject if contains too many special characters (>30% of length)
+    set special_count (echo $word | grep -o '[^[:alnum:] -]' | wc -l)
+    set total_len (string length $word)
+    set threshold (math "$total_len * 0.3")
+    if test $special_count -gt $threshold
+        return 1
+    end
+    
+    # Reject if contains obvious OCR garbage patterns
+    if echo $word | grep -qE '(oe|ee|ii|aa|oo){3,}|[[:punct:]]{3,}|^[0-9]+$'
+        return 1
+    end
+    
+    return 0
+end
+
+function is_better_than_original
+    # Check if new OCR result is better than original
+    set old_word $argv[1]
+    set new_word $argv[2]
+    set old_conf $argv[3]
+    set new_conf $argv[4]
+    
+    # Must be different
+    if test "$old_word" = "$new_word"
+        return 1
+    end
+    
+    # New text must pass basic validation
+    if not is_valid_word $new_word
+        return 1
+    end
+    
+    # New confidence must be significantly better (at least 30% improvement)
+    set conf_improvement (math "$new_conf - $old_conf")
+    if test $conf_improvement -lt 30
+        return 1
+    end
+    
+    # If new confidence is still very low (<25%), be extra cautious
+    if test $new_conf -lt 25
+        # Only accept if it looks like a common English word pattern
+        if not echo $new_word | grep -qiE '^[a-z]+$|^[a-z]+-[a-z]+$|^[a-z]+'\''[a-z]+$'
+            return 1
+        end
+    end
+    
+    return 0
+end
+
+function check_spelling
+    # Basic spell check using aspell if available
+    set word $argv[1]
+    
+    if not command -v aspell &>/dev/null
+        # No spell checker - accept the word
+        return 0
+    end
+    
+    # Check if it's a valid English word
+    set result (echo $word | aspell -a | tail -n 1)
+    if echo $result | grep -q '^[*+]'
+        # Word is correct or in dictionary
+        return 0
+    end
+    
+    # Check for common D&D/Planescape terms that might not be in dictionary
+    if echo $word | grep -qiE '^(sigil|githyanki|githzerai|modron|baatezu|tanarri|tiefling|bariaur|dabus)'
+        return 0
     end
     
     return 1
@@ -227,6 +326,13 @@ function process_chapter
     set reocr_dir "$temp_dir/reocr"
     if test $DRY_RUN = false
         mkdir -p $reocr_dir
+    end
+    
+    # Clear previous corrections files
+    if test $DRY_RUN = false
+        rm -f "$reocr_dir/corrections_auto.txt"
+        rm -f "$reocr_dir/corrections_manual.txt"
+        rm -f "$reocr_dir/rejected.txt"
     end
     
     # Process each TSV file
@@ -271,14 +377,30 @@ function process_chapter
             if test $DRY_RUN = true
                 echo "  Would re-OCR: \"$word\" (conf: $conf%) at $left,$top"
             else
-                set new_text (crop_and_reocr_region $page_image $left $top $width $height $reocr_dir $word_id)
+                set result (crop_and_reocr_region $page_image $left $top $width $height $reocr_dir $word_id)
                 
-                if test -n "$new_text"; and test "$new_text" != "$word"
-                    echo "  $word → $new_text (conf: $conf%)"
-                    set improved (math $improved + 1)
+                if test -n "$result"
+                    set result_parts (string split -- "|" $result)
+                    set new_text $result_parts[1]
+                    set new_conf $result_parts[2]
                     
-                    # Save the correction
-                    echo "$word:$new_text" >> "$reocr_dir/corrections.txt"
+                    if test "$new_text" != "$word"
+                        # Check if the new result is actually better
+                        if is_better_than_original $word $new_text $conf $new_conf
+                            # Further validate with spell checking
+                            if check_spelling $new_text
+                                echo (set_color green)"  ✓ $word → $new_text"(set_color normal)" (was: $conf%, now: $new_conf%)"
+                                set improved (math $improved + 1)
+                                echo "$word:$new_text" >> "$reocr_dir/corrections_auto.txt"
+                            else
+                                echo (set_color yellow)"  ? $word → $new_text"(set_color normal)" (was: $conf%, now: $new_conf%) [spelling]"
+                                echo "$word:$new_text|old_conf=$conf|new_conf=$new_conf|reason=spelling" >> "$reocr_dir/corrections_manual.txt"
+                            end
+                        else
+                            echo (set_color red)"  ✗ $word → $new_text"(set_color normal)" (was: $conf%, now: $new_conf%) [not better]"
+                            echo "$word:$new_text|old_conf=$conf|new_conf=$new_conf|reason=quality" >> "$reocr_dir/rejected.txt"
+                        end
+                    end
                 end
                 
                 set reprocessed (math $reprocessed + 1)
@@ -291,11 +413,31 @@ function process_chapter
     if test $DRY_RUN = true
         log_info "  Would process $total_regions regions"
     else
-        log_info "  Processed $reprocessed regions, $improved improved"
+        log_info "  Processed $reprocessed regions, $improved auto-approved"
         
-        # Output corrections file path if we found improvements
-        if test $improved -gt 0
-            log_info "  Corrections saved to: $reocr_dir/corrections.txt"
+        # Count corrections in each category
+        set auto_count 0
+        set manual_count 0
+        set rejected_count 0
+        
+        if test -f "$reocr_dir/corrections_auto.txt"
+            set auto_count (wc -l < "$reocr_dir/corrections_auto.txt")
+        end
+        if test -f "$reocr_dir/corrections_manual.txt"
+            set manual_count (wc -l < "$reocr_dir/corrections_manual.txt")
+        end
+        if test -f "$reocr_dir/rejected.txt"
+            set rejected_count (wc -l < "$reocr_dir/rejected.txt")
+        end
+        
+        if test $auto_count -gt 0
+            log_info "  → $auto_count auto-approved: $reocr_dir/corrections_auto.txt"
+        end
+        if test $manual_count -gt 0
+            log_warn "  → $manual_count need review: $reocr_dir/corrections_manual.txt"
+        end
+        if test $rejected_count -gt 0
+            log_verbose "  → $rejected_count rejected: $reocr_dir/rejected.txt"
         end
     end
 end
@@ -352,7 +494,16 @@ if test $DRY_RUN = true
     echo (set_color yellow)"✨ Dry run complete - no changes made"(set_color normal)
 else
     echo (set_color green)"✨ Re-OCR complete!"(set_color normal)
-    echo "   Check .temp/reocr/ directories for corrections"
-    echo "   Add corrections to corrections.json and re-run apply_corrections.fish"
+    echo ""
+    echo (set_color cyan)"Next steps:"(set_color normal)
+    echo "  1. Review corrections_auto.txt files - these passed all validation"
+    echo "  2. Review corrections_manual.txt files - these need human review"
+    echo "  3. Add approved corrections to corrections.json"
+    echo "  4. Re-run apply_corrections.fish to apply them"
+    echo ""
+    echo (set_color yellow)"Note:"(set_color normal)" Auto-approved corrections had:"
+    echo "  • Confidence improvement >30%"
+    echo "  • Passed spell-checking (or common D&D terms)"
+    echo "  • No obvious OCR garbage patterns"
 end
 echo ""
