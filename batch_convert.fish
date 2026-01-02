@@ -474,7 +474,11 @@ end
 # Clean mode
 if set -q CLEAN_MODE
     log_info "Cleaning chapter checkpoints..."
-    rm -f $OUTPUT_ROOT/*/.checkpoint_complete 2>/dev/null
+    for checkpoint in $OUTPUT_ROOT/*/.checkpoint_complete
+        if test -f $checkpoint
+            rm -f $checkpoint
+        end
+    end
 end
 
 # Record start time

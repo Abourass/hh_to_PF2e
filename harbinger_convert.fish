@@ -400,11 +400,6 @@ function ocr_single_page
             tesseract $tess_args tsv 2>/dev/null
             tesseract $tess_args txt 2>/dev/null
 
-            # Append column text
-            if test -f $temp_dir/$col_base-text.txt
-                set combined_text "$combined_text\n\n<!-- COLUMN $col_idx -->\n\n"(cat $temp_dir/$col_base-text.txt)
-            end
-
             # Extract low-confidence words from this column
             if test -f $temp_dir/$col_base.tsv
                 awk -F'\t' -v threshold=$OCR_CONFIDENCE_THRESHOLD \
@@ -414,8 +409,18 @@ function ocr_single_page
             end
         end
 
-        # Write combined text
-        echo -e $combined_text > $temp_dir/$basename-text.txt
+        # Combine column text files into single output
+        echo "" > $temp_dir/$basename-text.txt
+        for col_idx in (seq 1 (count $column_images))
+            set col_base "$basename-col$col_idx"
+            if test -f $temp_dir/$col_base.txt
+                echo "" >> $temp_dir/$basename-text.txt
+                echo "" >> $temp_dir/$basename-text.txt
+                echo "<!-- COLUMN $col_idx -->" >> $temp_dir/$basename-text.txt
+                echo "" >> $temp_dir/$basename-text.txt
+                cat $temp_dir/$col_base.txt >> $temp_dir/$basename-text.txt
+            end
+        end
 
     else if test -f $cleaned_img
         # Interactive preprocessing created a cleaned image (no columns)
