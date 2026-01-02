@@ -211,8 +211,7 @@ function convert_chapters
         
         echo ""
         echo (set_color cyan)"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"(set_color normal)
-        set progress_bar (render_progress_bar $current $total_chapters 20)
-        echo (set_color yellow)"[$current/$total_chapters] $chapter_name "(set_color normal)"(pages $start_page-$end_page) "(set_color blue)"$progress_bar"(set_color normal)" "(set_color yellow)"$eta_str"(set_color normal)
+        echo (set_color yellow)"[$current/$total_chapters] $chapter_name "(set_color normal)"(pages $start_page-$end_page)  "(set_color yellow)"$eta_str"(set_color normal)
         echo (set_color cyan)"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"(set_color normal)
         
         # Check if already complete
