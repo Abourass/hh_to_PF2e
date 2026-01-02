@@ -113,14 +113,25 @@ set -g __progress_start_time 0
 set -g __progress_label ""
 set -g __progress_current 0
 set -g __progress_total 0
+set -g __progress_current_item ""
+set -g __progress_status_file ""
 
 function progress_start
     # Initialize progress tracking
-    # Usage: progress_start total "Processing items"
+    # Usage: progress_start total "Processing items" [status_dir]
     set -g __progress_total $argv[1]
     set -g __progress_label $argv[2]
     set -g __progress_current 0
+    set -g __progress_current_item ""
     set -g __progress_start_time (date +%s)
+    
+    # Initialize status file for parallel job tracking
+    if test -n "$argv[3]"
+        set -g __progress_status_file "$argv[3]/.progress_status"
+        echo "" > $__progress_status_file
+    else
+        set -g __progress_status_file ""
+    end
     
     # Show initial state
     if is_interactive
@@ -132,13 +143,25 @@ end
 
 function progress_update
     # Update progress to a specific value or increment
-    # Usage: progress_update [current] or progress_update +1
+    # Usage: progress_update [current] [current_item_label]
+    # current can be a number or "+1" to increment
     if test "$argv[1]" = "+1"
         set -g __progress_current (math $__progress_current + 1)
     else if test -n "$argv[1]"
         set -g __progress_current $argv[1]
     else
         set -g __progress_current (math $__progress_current + 1)
+    end
+    
+    # Update current item label if provided
+    if test -n "$argv[2]"
+        set -g __progress_current_item $argv[2]
+    else if test -n "$__progress_status_file"; and test -f "$__progress_status_file"
+        # Read latest status from file (for parallel jobs)
+        set -l latest_status (tail -1 $__progress_status_file 2>/dev/null)
+        if test -n "$latest_status"
+            set -g __progress_current_item $latest_status
+        end
     end
     
     if is_interactive
@@ -157,10 +180,18 @@ function progress_show
     
     set -l term_width (get_terminal_width)
     
-    # Calculate available space for progress bar
-    # Format: "│ Label [████░░░░] 50% (5/10) ETA: 1m 30s"
-    # Reserve space for: prefix(2) + label(var) + bar(var) + percent(5) + count(var) + eta(var)
+    # Build current item display string (truncated if needed)
+    set -l item_str ""
+    if test -n "$__progress_current_item"
+        # Truncate item label if too long (max 25 chars)
+        set -l item_display $__progress_current_item
+        if test (string length $item_display) -gt 25
+            set item_display (string sub -l 22 $item_display)"..."
+        end
+        set item_str "($item_display) "
+    end
     
+    # Format: "│ Label (current-item) [████░░░░] 50% (5/10) ETA: 1m 30s"
     set -l count_str "($current/$__progress_total)"
     set -l eta_str ""
     
@@ -175,8 +206,8 @@ function progress_show
     end
     
     # Calculate bar width based on available space
-    # Total: prefix(2) + space(1) + label + space(1) + bar + space(1) + percent(4) + space(1) + count + space(1) + eta
-    set -l fixed_width (math "2 + 1 + "(string length $__progress_label)" + 1 + 2 + 5 + 1 + "(string length $count_str)" + 1 + "(string length $eta_str))
+    # Total: prefix(2) + space(1) + label + space(1) + item_str + bar + space(1) + percent(4) + space(1) + count + space(1) + eta
+    set -l fixed_width (math "2 + 1 + "(string length $__progress_label)" + 1 + "(string length $item_str)" + 2 + 5 + 1 + "(string length $count_str)" + 1 + "(string length $eta_str))
     set -l bar_width (math "$term_width - $fixed_width")
     
     # Ensure minimum bar width
@@ -189,14 +220,38 @@ function progress_show
     
     set -l progress_bar (render_progress_bar $current $__progress_total $bar_width)
     
+    # Clear line first to handle variable-length item strings
+    printf "\r%s" (string repeat -n $term_width " ") >&2
+    
     # Use carriage return to overwrite previous line
-    printf "\r%s│%s %s %s %s %s" \
+    printf "\r%s│%s %s %s%s %s %s" \
         (set_color cyan) \
         (set_color normal) \
         "$__progress_label" \
+        (set_color magenta)"$item_str"(set_color normal) \
         "$progress_bar" \
         (set_color blue)"$count_str"(set_color normal) \
         (set_color yellow)"$eta_str"(set_color normal) >&2
+end
+
+function progress_set_status
+    # Set the current item status (for parallel job updates)
+    # Usage: progress_set_status "page-01" [status_file]
+    # If status_file provided, writes to file (for background jobs)
+    # Otherwise updates global variable directly
+    set -l item_label $argv[1]
+    set -l status_file $argv[2]
+    
+    if test -n "$status_file"
+        # Background job: write to status file
+        echo $item_label >> $status_file
+    else if test -n "$__progress_status_file"
+        # Use global status file
+        echo $item_label >> $__progress_status_file
+    else
+        # Direct update (foreground)
+        set -g __progress_current_item $item_label
+    end
 end
 
 function progress_finish
@@ -224,11 +279,18 @@ function progress_finish
         echo "│ ✓ $__progress_label $message ($__progress_total/$__progress_total) in $elapsed_str" >&2
     end
     
+    # Clean up status file if exists
+    if test -n "$__progress_status_file"; and test -f "$__progress_status_file"
+        rm -f $__progress_status_file
+    end
+    
     # Reset state
     set -g __progress_start_time 0
     set -g __progress_current 0
     set -g __progress_total 0
     set -g __progress_label ""
+    set -g __progress_current_item ""
+    set -g __progress_status_file ""
 end
 
 # ============================================================================
