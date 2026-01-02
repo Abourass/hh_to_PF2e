@@ -146,8 +146,14 @@ function crop_and_reocr_region
     
     # Add padding around the region for better context
     set padding 10
-    set crop_left (math "max(0, $left - $padding)")
-    set crop_top (math "max(0, $top - $padding)")
+    set crop_left (math "$left - $padding")
+    if test $crop_left -lt 0
+        set crop_left 0
+    end
+    set crop_top (math "$top - $padding")
+    if test $crop_top -lt 0
+        set crop_top 0
+    end
     set crop_width (math "$width + 2 * $padding")
     set crop_height (math "$height + 2 * $padding")
     
@@ -250,7 +256,7 @@ function process_chapter
         
         set word_idx 0
         for region in $regions
-            set parts (string split "|" $region)
+            set parts (string split -- "|" $region)
             set word $parts[1]
             set left $parts[2]
             set top $parts[3]
