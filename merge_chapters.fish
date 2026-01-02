@@ -61,8 +61,29 @@ echo (set_color cyan)"║"(set_color normal)(set_color yellow)"           HARBIN
 echo (set_color cyan)"╚════════════════════════════════════════════════════════════╝"(set_color normal)
 echo ""
 
-# Find all chapter files
-set CHAPTER_FILES $CONVERTED_DIR/final/*.md
+# Find all chapter files - use pipeline_config.json for ordering if available
+set CONFIG_FILE "pipeline_config.json"
+set CHAPTER_FILES
+
+if test -f "$CONFIG_FILE"
+    # Read chapter order from config file
+    set chapter_names (jq -r '.chapters[].name' "$CONFIG_FILE" 2>/dev/null)
+    if test -n "$chapter_names"
+        for chapter_name in $chapter_names
+            set chapter_path "$CONVERTED_DIR/final/$chapter_name.md"
+            if test -f "$chapter_path"
+                set -a CHAPTER_FILES "$chapter_path"
+            else
+                echo (set_color yellow)"[WARN]"(set_color normal) " Chapter file not found: $chapter_path"
+            end
+        end
+    end
+end
+
+# Fallback to alphabetical glob if no config or no chapters found
+if test (count $CHAPTER_FILES) -eq 0
+    set CHAPTER_FILES $CONVERTED_DIR/final/*.md
+end
 
 if test (count $CHAPTER_FILES) -eq 0
     echo (set_color red)"[ERROR]"(set_color normal) " No chapter files found in $CONVERTED_DIR/final/"
